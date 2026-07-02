@@ -1,0 +1,652 @@
+import { useEffect, useMemo, useState } from 'react';
+import type { AppData, Employee, Specialization, Task } from './types';
+import { schedule } from './engine/scheduler';
+import { parseISO, SHORT_MONTHS, SHORT_WEEKDAYS } from './engine/dates';
+import { GanttChart } from './components/GanttChart';
+import { TaskForm } from './components/TaskForm';
+import { EmployeeManager } from './components/EmployeeManager';
+import { PRIORITY_STYLE } from './components/stageStyle';
+import { makeSampleData } from './data/sampleData';
+import {
+  saveToFile,
+  openFromFile,
+  autosave,
+  loadAutosave,
+  hasFileSystemAccess,
+  type FsFileHandle,
+} from './storage/fileStorage';
+import {
+  publishPlan,
+  fetchSharedPlan,
+  shareUrl,
+  planIdFromUrl,
+} from './storage/shareStorage';
+import { downloadMarkdown } from './export/markdownExport';
+
+function formatFull(iso: string | null): string {
+  if (!iso) return '—';
+  const d = parseISO(iso);
+  return `${d.getDate()} ${SHORT_MONTHS[d.getMonth()]}`;
+}
+
+/** Дата релиза с днём недели, напр. "18 июн, чт". */
+function formatRelease(iso: string | null): string {
+  if (!iso) return '—';
+  return `${formatFull(iso)}, ${SHORT_WEEKDAYS[parseISO(iso).getDay()]}`;
+}
+
+const newId = () =>
+  typeof crypto !== 'undefined' && crypto.randomUUID
+    ? crypto.randomUUID()
+    : Math.random().toString(36).slice(2);
+
+// Настройка вида «показывать релизы на ганте» — личное предпочтение зрителя,
+// поэтому живёт в localStorage, а не в данных плана (файл/общая ссылка).
+const SHOW_RELEASES_KEY = 'resource-planner:show-releases';
+
+function loadShowReleases(): boolean {
+  try {
+    return localStorage.getItem(SHOW_RELEASES_KEY) !== '0';
+  } catch {
+    return true;
+  }
+}
+
+export default function App() {
+  // Если открыли по общей ссылке (?plan=...) — режим только-чтения.
+  const sharedId = useMemo(() => planIdFromUrl(), []);
+  const readOnly = sharedId !== null;
+
+  const [data, setData] = useState<AppData>(() =>
+    readOnly ? makeSampleData() : loadAutosave() ?? makeSampleData(),
+  );
+  // Стеки отмены/повтора снимков data для перетаскиваний на ганте.
+  const [undoStack, setUndoStack] = useState<AppData[]>([]);
+  const [redoStack, setRedoStack] = useState<AppData[]>([]);
+  const [handle, setHandle] = useState<FsFileHandle | null>(null);
+  const [showForm, setShowForm] = useState(false);
+  const [editingTask, setEditingTask] = useState<Task | null>(null);
+  const [showTeam, setShowTeam] = useState(false);
+  const [status, setStatus] = useState<string>('');
+  const [shareLink, setShareLink] = useState<string>('');
+  const [loading, setLoading] = useState<boolean>(readOnly);
+  const [loadError, setLoadError] = useState<boolean>(false);
+  const [showReleases, setShowReleases] = useState<boolean>(loadShowReleases);
+
+  const toggleReleases = () =>
+    setShowReleases((v) => {
+      const next = !v;
+      try {
+        localStorage.setItem(SHOW_RELEASES_KEY, next ? '1' : '0');
+      } catch {
+        // приватный режим — настройка просто не переживёт перезагрузку
+      }
+      return next;
+    });
+
+  // Загрузка опубликованного плана при открытии по ссылке.
+  useEffect(() => {
+    if (!sharedId) return;
+    fetchSharedPlan(sharedId)
+      .then((d) => setData(d))
+      .catch(() => setLoadError(true))
+      .finally(() => setLoading(false));
+  }, [sharedId]);
+
+  // Reflow: расписание пересчитывается при любом изменении данных.
+  const result = useMemo(() => schedule(data), [data]);
+
+  // Автосохранение в localStorage (только в своём режиме редактирования).
+  useEffect(() => {
+    if (!readOnly) autosave(data);
+  }, [data, readOnly]);
+
+  const visibleDays = data.horizonWeeks * 5;
+
+  const releasesSorted = useMemo(
+    () => [...result.releases].sort((a, b) => a.qaEndIndex - b.qaEndIndex),
+    [result.releases],
+  );
+
+  // Последний видимый день горизонта — для пометки «за горизонтом».
+  const lastVisibleDate = result.days[visibleDays - 1] ?? null;
+
+  const nextPriority = useMemo(() => {
+    const min = data.tasks.reduce((m, t) => Math.min(m, t.priority), 3);
+    return Math.max(1, min);
+  }, [data.tasks]);
+
+  const addTask = (task: Task) =>
+    setData((d) => ({ ...d, tasks: [...d.tasks, task] }));
+
+  const updateTask = (task: Task) =>
+    setData((d) => ({
+      ...d,
+      tasks: d.tasks.map((t) => (t.id === task.id ? task : t)),
+    }));
+
+  const deleteTask = (id: string) =>
+    setData((d) => ({ ...d, tasks: d.tasks.filter((t) => t.id !== id) }));
+
+  const setPriority = (id: string, priority: number) =>
+    setData((d) => ({
+      ...d,
+      tasks: d.tasks.map((t) => (t.id === id ? { ...t, priority } : t)),
+    }));
+
+  const setHorizonWeeks = (w: number) =>
+    setData((d) => ({ ...d, horizonWeeks: w }));
+
+  // Запомнить текущий снимок перед изменением и очистить стек повтора.
+  const pushUndo = () => {
+    setUndoStack((h) => [...h.slice(-49), data]);
+    setRedoStack([]);
+  };
+
+  // Откатить последнее перетаскивание (Ctrl+Z).
+  const undo = () => {
+    setUndoStack((past) => {
+      if (past.length === 0) return past;
+      setRedoStack((r) => [...r, data]);
+      setData(past[past.length - 1]);
+      return past.slice(0, -1);
+    });
+  };
+
+  // Вернуть отменённое (Ctrl+Shift+Z / Ctrl+Y).
+  const redo = () => {
+    setRedoStack((future) => {
+      if (future.length === 0) return future;
+      setUndoStack((u) => [...u, data]);
+      setData(future[future.length - 1]);
+      return future.slice(0, -1);
+    });
+  };
+
+  // Горячие клавиши: Ctrl/Cmd+Z — отмена, Ctrl+Shift+Z / Ctrl+Y — повтор.
+  useEffect(() => {
+    if (readOnly) return;
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      // Не перехватываем, когда пользователь печатает в поле ввода.
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+      const mod = e.ctrlKey || e.metaKey;
+      if (!mod) return;
+      const key = e.key.toLowerCase();
+      if (key === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        undo();
+      } else if ((key === 'z' && e.shiftKey) || key === 'y') {
+        e.preventDefault();
+        redo();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
+
+  // Перетащили этап на сотрудника и день — закрепляем вручную.
+  const moveStage = (stageId: string, employeeId: string, isoDate: string) => {
+    pushUndo();
+    setData((d) => ({
+      ...d,
+      tasks: d.tasks.map((t) => ({
+        ...t,
+        stages: t.stages.map((s) =>
+          s.id === stageId
+            ? { ...s, assigneeId: employeeId, pinnedStartDate: isoDate }
+            : s,
+        ),
+      })),
+    }));
+  };
+
+  // Сняли закрепление — этап возвращается в авторазмещение.
+  const unpinStage = (stageId: string) => {
+    pushUndo();
+    setData((d) => ({
+      ...d,
+      tasks: d.tasks.map((t) => ({
+        ...t,
+        stages: t.stages.map((s) =>
+          s.id === stageId ? { ...s, pinnedStartDate: null } : s,
+        ),
+      })),
+    }));
+  };
+
+  const hasPins = useMemo(
+    () => data.tasks.some((t) => t.stages.some((s) => s.pinnedStartDate)),
+    [data.tasks],
+  );
+
+  // Снять все ручные закрепления — страховка, если запутался в перетаскиваниях.
+  const resetPins = () => {
+    pushUndo();
+    setData((d) => ({
+      ...d,
+      tasks: d.tasks.map((t) => ({
+        ...t,
+        stages: t.stages.map((s) => ({ ...s, pinnedStartDate: null })),
+      })),
+    }));
+  };
+
+  // --- Управление командой ---
+  const addEmployee = (name: string, specialization: Specialization) =>
+    setData((d) => ({
+      ...d,
+      employees: [
+        ...d.employees,
+        { id: newId(), name, specialization, unavailable: [] },
+      ],
+    }));
+
+  const updateEmployee = (id: string, patch: Partial<Employee>) =>
+    setData((d) => ({
+      ...d,
+      employees: d.employees.map((e) => (e.id === id ? { ...e, ...patch } : e)),
+    }));
+
+  // Удаление человека снимает его со всех этапов (assigneeId → null).
+  const deleteEmployee = (id: string) =>
+    setData((d) => ({
+      ...d,
+      employees: d.employees.filter((e) => e.id !== id),
+      tasks: d.tasks.map((t) => ({
+        ...t,
+        stages: t.stages.map((s) =>
+          s.assigneeId === id ? { ...s, assigneeId: null } : s,
+        ),
+      })),
+    }));
+
+  const onSave = async () => {
+    try {
+      const h = await saveToFile(data, handle);
+      if (h) setHandle(h);
+      setStatus('Сохранено в файл');
+    } catch {
+      setStatus('Сохранение отменено');
+    }
+  };
+
+  const onLoad = async () => {
+    try {
+      const { data: loaded, handle: h } = await openFromFile();
+      setData(loaded);
+      setHandle(h);
+      setStatus('Загружено из файла');
+    } catch {
+      setStatus('Загрузка отменена');
+    }
+  };
+
+  // Опубликовать план и получить постоянную ссылку для коллег (только просмотр).
+  const onShare = async () => {
+    try {
+      setStatus('Публикую…');
+      const id = await publishPlan(data);
+      const url = shareUrl(id);
+      setShareLink(url);
+      try {
+        await navigator.clipboard?.writeText(url);
+        setStatus('Ссылка скопирована — отправьте коллегам');
+      } catch {
+        setStatus('Ссылка готова — скопируйте её ниже');
+      }
+    } catch {
+      setShareLink('');
+      setStatus('Не удалось опубликовать. Подключено ли хранилище в Vercel?');
+    }
+  };
+
+  const noop = () => {};
+
+  if (loading) {
+    return (
+      <div className="flex min-h-full items-center justify-center p-10 text-slate-500">
+        Загрузка плана…
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="mx-auto flex min-h-full max-w-md flex-col items-center justify-center gap-3 p-10 text-center">
+        <p className="text-lg font-semibold text-slate-700">План не найден</p>
+        <p className="text-sm text-slate-500">
+          Ссылка устарела или план был удалён. Попросите автора прислать
+          актуальную ссылку.
+        </p>
+        <a
+          href={location.origin + location.pathname}
+          className="rounded-md bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-700"
+        >
+          Открыть свой планировщик
+        </a>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mx-auto flex min-h-full max-w-[1400px] flex-col gap-4 p-5">
+      <header className="flex flex-wrap items-center gap-3">
+        <h1 className="text-xl font-bold text-slate-800">Планировщик ресурсов</h1>
+        <span className="text-sm text-slate-400">
+          {data.employees.length} чел · {data.tasks.length} задач
+        </span>
+
+        {readOnly ? (
+          <div className="ml-auto flex items-center gap-3">
+            <span className="rounded-full bg-slate-100 px-3 py-1 text-sm text-slate-600">
+              👁 Просмотр — только чтение
+            </span>
+            <button
+              onClick={() => downloadMarkdown(data, result)}
+              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100"
+              title="Скачать план таблицей в markdown (.md)"
+            >
+              Экспорт .md
+            </button>
+            <a
+              href={location.origin + location.pathname}
+              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100"
+            >
+              Создать свой план
+            </a>
+          </div>
+        ) : (
+          <div className="ml-auto flex items-center gap-2">
+            <label className="flex items-center gap-1 text-sm text-slate-500">
+              Горизонт:
+              <input
+                type="number"
+                min={1}
+                max={52}
+                value={data.horizonWeeks}
+                onChange={(e) =>
+                  setHorizonWeeks(
+                    Math.min(52, Math.max(1, Number(e.target.value) || 1)),
+                  )
+                }
+                className="w-16 rounded border border-slate-300 px-2 py-1 text-center tabular-nums"
+              />
+              нед.
+            </label>
+            <button
+              onClick={() => setShowTeam(true)}
+              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100"
+            >
+              Сотрудники
+            </button>
+            <button
+              onClick={() => setShowForm(true)}
+              className="rounded-md bg-sky-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-sky-700"
+            >
+              + Задача
+            </button>
+            <button
+              onClick={undo}
+              disabled={undoStack.length === 0}
+              title="Отменить (Ctrl+Z)"
+              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100 disabled:opacity-40"
+            >
+              ↶ Отменить
+            </button>
+            <button
+              onClick={redo}
+              disabled={redoStack.length === 0}
+              title="Повторить (Ctrl+Shift+Z)"
+              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100 disabled:opacity-40"
+            >
+              ↷ Повторить
+            </button>
+            {hasPins && (
+              <button
+                onClick={resetPins}
+                className="rounded-md border border-slate-300 px-3 py-1.5 text-sm text-slate-500 hover:bg-slate-100"
+                title="Снять все ручные закрепления и вернуть автопланирование"
+              >
+                Сбросить закрепления
+              </button>
+            )}
+            <button
+              onClick={onSave}
+              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100"
+            >
+              Сохранить
+            </button>
+            <button
+              onClick={onLoad}
+              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100"
+            >
+              Загрузить
+            </button>
+            <button
+              onClick={() => {
+                downloadMarkdown(data, result);
+                setStatus('Выгружено в team-plan.md');
+              }}
+              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100"
+              title="Скачать план таблицей в markdown (.md)"
+            >
+              Экспорт .md
+            </button>
+            <button
+              onClick={onShare}
+              className="rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700"
+              title="Опубликовать план и получить ссылку для коллег (только просмотр)"
+            >
+              Поделиться
+            </button>
+            <button
+              onClick={() => {
+                setData(makeSampleData());
+                setHandle(null);
+                setStatus('Сброшено к демо-данным');
+              }}
+              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm text-slate-500 hover:bg-slate-100"
+            >
+              Демо
+            </button>
+          </div>
+        )}
+      </header>
+
+      {shareLink && !readOnly && (
+        <div className="flex flex-wrap items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs">
+          <span className="font-medium text-emerald-700">Ссылка для коллег:</span>
+          <input
+            readOnly
+            value={shareLink}
+            onFocus={(e) => e.currentTarget.select()}
+            className="flex-1 rounded border border-emerald-200 bg-white px-2 py-1 text-slate-700"
+          />
+          <span className="text-emerald-600">
+            обновляйте кнопкой «Поделиться» — ссылка не меняется
+          </span>
+        </div>
+      )}
+
+      {(status || !hasFileSystemAccess()) && (
+        <div className="flex items-center gap-3 text-xs">
+          {status && <span className="text-slate-500">{status}</span>}
+          {!hasFileSystemAccess() && (
+            <span className="text-amber-600">
+              Браузер не поддерживает прямую запись в файл — используется
+              скачивание/загрузка. Лучше открыть в Chrome или Edge.
+            </span>
+          )}
+        </div>
+      )}
+
+      {result.warnings.length > 0 && (
+        <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+          {result.warnings.slice(0, 3).map((w, i) => (
+            <div key={i}>{w}</div>
+          ))}
+          {result.warnings.length > 3 && (
+            <div>…и ещё {result.warnings.length - 3}</div>
+          )}
+        </div>
+      )}
+
+      <GanttChart
+        data={data}
+        result={result}
+        showReleases={showReleases}
+        onMoveStage={readOnly ? noop : moveStage}
+        onUnpinStage={readOnly ? noop : unpinStage}
+      />
+
+      {/* Легенда */}
+      <div className="flex flex-wrap items-center gap-4 text-xs text-slate-500">
+        <Legend color="bg-indigo-500" label="Архитектура" />
+        <Legend color="bg-sky-500" label="Разработка" />
+        <Legend color="bg-amber-400" label="Ревью кода" />
+        <Legend color="bg-emerald-500" label="QA" />
+        <Legend color="bg-red-500/15 ring-2 ring-inset ring-red-500" label="Перегрузка (наложение)" />
+        <label className="flex cursor-pointer select-none items-center gap-1.5">
+          <input
+            type="checkbox"
+            checked={showReleases}
+            onChange={toggleReleases}
+            className="accent-emerald-600"
+          />
+          🚀 Релизы на ганте
+        </label>
+        <span className="text-slate-400">
+          Перетащите этап на другого человека или день, чтобы закрепить вручную.
+          Двойной клик по закреплённому блоку — снять закрепление. Ctrl+Z —
+          отменить последнее действие.
+        </span>
+      </div>
+
+      {/* Релизы */}
+      <section className="rounded-lg border border-slate-200 bg-white">
+        <h2 className="border-b border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700">
+          Задачи и даты релизов
+        </h2>
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-xs text-slate-400">
+              <th className="px-4 py-2 font-medium">Приоритет</th>
+              <th className="px-4 py-2 font-medium">Задача</th>
+              <th className="px-4 py-2 font-medium">QA готово</th>
+              <th className="px-4 py-2 font-medium">Релиз (вт/чт)</th>
+              <th className="px-4 py-2"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {releasesSorted.map((rel) => {
+              const task = data.tasks.find((t) => t.id === rel.taskId)!;
+              const beyond =
+                rel.releaseDate !== null &&
+                lastVisibleDate !== null &&
+                rel.releaseDate > lastVisibleDate;
+              return (
+                <tr
+                  key={rel.taskId}
+                  className="border-t border-slate-100 hover:bg-slate-50"
+                >
+                  <td className="px-4 py-2">
+                    <input
+                      type="number"
+                      min={1}
+                      value={task.priority}
+                      disabled={readOnly}
+                      onChange={(e) =>
+                        setPriority(task.id, Number(e.target.value) || 1)
+                      }
+                      className={`w-14 rounded border px-2 py-0.5 text-center tabular-nums disabled:opacity-60 ${PRIORITY_STYLE(
+                        task.priority,
+                      )}`}
+                    />
+                  </td>
+                  <td className="px-4 py-2 text-slate-700">{rel.taskName}</td>
+                  <td className="px-4 py-2 tabular-nums text-slate-500">
+                    {formatFull(rel.qaEndDate)}
+                  </td>
+                  <td className="px-4 py-2">
+                    <span className="font-medium tabular-nums text-slate-800">
+                      {formatRelease(rel.releaseDate)}
+                    </span>
+                    {beyond && (
+                      <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-700">
+                        за горизонтом
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-4 py-2 text-right">
+                    {!readOnly && (
+                      <span className="flex items-center justify-end gap-3">
+                        <button
+                          onClick={() => setEditingTask(task)}
+                          className="text-xs text-slate-400 hover:text-sky-600"
+                        >
+                          редактировать
+                        </button>
+                        <button
+                          onClick={() => deleteTask(rel.taskId)}
+                          className="text-xs text-slate-400 hover:text-rose-600"
+                        >
+                          удалить
+                        </button>
+                      </span>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </section>
+
+      {showForm && (
+        <TaskForm
+          employees={data.employees}
+          defaultPriority={nextPriority}
+          onAdd={addTask}
+          onClose={() => setShowForm(false)}
+        />
+      )}
+
+      {editingTask && (
+        <TaskForm
+          employees={data.employees}
+          defaultPriority={editingTask.priority}
+          initialTask={editingTask}
+          onAdd={updateTask}
+          onClose={() => setEditingTask(null)}
+        />
+      )}
+
+      {showTeam && (
+        <EmployeeManager
+          employees={data.employees}
+          onAdd={addEmployee}
+          onUpdate={updateEmployee}
+          onDelete={deleteEmployee}
+          onClose={() => setShowTeam(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+function Legend({ color, label }: { color: string; label: string }) {
+  return (
+    <span className="flex items-center gap-1.5">
+      <span className={`inline-block h-3 w-3 rounded-sm ${color}`} />
+      {label}
+    </span>
+  );
+}
