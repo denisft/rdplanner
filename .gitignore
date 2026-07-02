@@ -27,3 +27,7 @@ dist-ssr
 
 # личные настройки Claude Code (разрешения этой машины)
 .claude/settings.local.json
+
+# внутренние продуктовые доки — не публикуем
+resource-planner-PRD.md
+resource-planner-PRD-addendum-competitive.md
