@@ -11,18 +11,13 @@
 
 ## Деплой на прод
 
-Проект привязан к Vercel (`.vercel/project.json`, team dfs-projects-planning). По команде «задеплой на прод» — без лишних вопросов:
-
-1. `npm test` и `npm run build`
-2. `npx vercel --prod --yes`
-3. Проверить прод: https://dist-rho-seven-68.vercel.app (постоянный алиас)
-
-Известный шум: в логе сборки Vercel — ошибки TS2591 «Cannot find name 'process'» из `api/*.ts`. Не фатальны, деплой проходит — не считать падением.
+Проект привязан к Vercel (`.vercel/project.json`, team dfs-projects-planning). По команде «задеплой на прод» — без лишних вопросов, по скиллу `deploy-prod` (`.claude/skills/deploy-prod/SKILL.md`): тесты → сборка → `npx vercel --prod --yes` → проверка алиаса https://dist-rho-seven-68.vercel.app → запись изменений в `releasenote.md`.
 
 ## Доменная модель (src/types.ts)
 
 - `AppData = { employees, tasks, horizonStart, horizonWeeks }` — весь стейт приложения, единый объект; любые изменения через `setData`, расписание пересчитывается `useMemo(() => schedule(data))`.
-- `Task = { id, name, priority, stages[] }`. Приоритет: **меньше число = выше**, решает конфликты за человека.
+- `Task = { id, name, priority, stages[], done?, completedAt? }`. Приоритет: **меньше число = выше**, решает конфликты за человека.
+- Завершение задачи (`src/engine/complete.ts`): `completeTask` ставит `done` и замораживает этапы — закрепляет их на текущих рассчитанных датах, чтобы история не ездила. На ганте — серый блок «✓», не таскается; в таблице — свёрнутая секция «Завершённые» (вернуть в работу / удалить). Завершённые продолжают занимать людей, но исключены из CSV/.md-экспортов и предупреждений; их закреплённые этапы, уехавшие за начало горизонта, выпадают из расчёта («прошлое не воскресает»).
 - Этапы строго последовательны: `architecture → development → review → qa` (у задачи может быть подмножество). `Stage = { id, type, durationDays, assigneeId, pinnedStartDate? }`.
 - Специализации: `lead | backend | frontend | qa`. Кто что может (`src/roles.ts`): architecture и review — только lead; qa — только qa; development — backend/frontend/lead.
 - Время — только рабочие дни пн–пт, даты — строки `YYYY-MM-DD` (без Date в стейте, чтобы не зависеть от таймзоны). `Employee.unavailable` — диапазоны отпусков/больничных.
@@ -40,10 +35,11 @@
 ## Карта файлов
 
 - `src/App.tsx` — корневой компонент: весь стейт, тулбар (горизонт, сохранить/загрузить/поделиться), undo/redo (стеки снимков `data`, Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y), таблица «Задачи и даты релизов», режим read-only при `?plan=...`
-- `src/components/GanttChart.tsx` — гант: строки сотрудников по специализациям, interval-раскладка пересекающихся этапов по дорожкам, drag&drop (бросок = закрепление `pinnedStartDate`, двойной клик — открепить), маркеры «сегодня» и релизов 🚀, проп `showReleases`. Константы: CELL=34px, NAME_W=200, LANE_H=24
+- `src/components/GanttChart.tsx` — гант: строки сотрудников по специализациям, interval-раскладка пересекающихся этапов по дорожкам, drag&drop (бросок = закрепление `pinnedStartDate`, двойной клик — открепить, Alt+двойной клик — открыть задачу на редактирование), маркеры «сегодня» и релизов 🚀, проп `showReleases`. Константы: CELL=34px, NAME_W=200, LANE_H=24
 - `src/components/TaskForm.tsx` — модалка создания/редактирования задачи (этапы, длительности, исполнители из `assigneePool`)
 - `src/components/EmployeeManager.tsx` — модалка сотрудников (добавление, специализация, недоступность)
 - `src/components/stageStyle.ts` — цвета этапов (indigo/sky/amber/emerald) и приоритетов
+- `src/engine/complete.ts` — завершение задачи (заморозка этапов) и возврат в работу
 - `src/engine/dates.ts` — рабочие дни, parseISO/formatISO, nextReleaseDay (вт/чт)
 - `src/data/sampleData.ts` — демо-данные (кнопка «Демо»)
 - `api/save.ts`, `api/load.ts` — serverless-функции Vercel для шаринга, Upstash Redis (env: `KV_REST_API_URL/TOKEN` или `UPSTASH_REDIS_REST_*`), ключи `plan:{id}`

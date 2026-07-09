@@ -7,6 +7,7 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
     host: '127.0.0.1',
-    port: 5173,
+    // PORT задаёт превью-обвязка Claude, когда 5173 занят другой сессией.
+    port: Number(process.env.PORT) || 5173,
   },
 })
