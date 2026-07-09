@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { AppData, Employee, Specialization, Task } from './types';
 import { schedule } from './engine/scheduler';
 import { completeTask, reopenTask } from './engine/complete';
@@ -43,6 +43,10 @@ const newId = () =>
     ? crypto.randomUUID()
     : Math.random().toString(36).slice(2);
 
+// Статусное сообщение под тулбаром: успех гаснет сам, ошибка висит,
+// пока пользователь не закроет её или не повторит действие.
+type Status = { text: string; kind: 'ok' | 'error' };
+
 // Настройка вида «показывать релизы на ганте» — личное предпочтение зрителя,
 // поэтому живёт в localStorage, а не в данных плана (файл/общая ссылка).
 const SHOW_RELEASES_KEY = 'resource-planner:show-releases';
@@ -72,8 +76,13 @@ export default function App() {
   const [showTeam, setShowTeam] = useState(false);
   // Модалка «Отчёт за период» — доступна и в режиме просмотра по ссылке.
   const [showReport, setShowReport] = useState(false);
-  const [status, setStatus] = useState<string>('');
+  const [status, setStatus] = useState<Status | null>(null);
   const [shareLink, setShareLink] = useState<string>('');
+  // Публикация в процессе: «Поделиться» заблокирована, повторный клик невозможен.
+  // Ref — синхронная страховка: два клика в одном тике не успевают увидеть
+  // обновлённый стейт, а ref видят сразу.
+  const [sharing, setSharing] = useState<boolean>(false);
+  const sharingRef = useRef(false);
   const [loading, setLoading] = useState<boolean>(readOnly);
   const [loadError, setLoadError] = useState<boolean>(false);
   const [showReleases, setShowReleases] = useState<boolean>(loadShowReleases);
@@ -93,6 +102,13 @@ export default function App() {
       }
       return next;
     });
+
+  // Успешный статус гаснет сам; ошибка остаётся до закрытия крестиком.
+  useEffect(() => {
+    if (!status || status.kind !== 'ok') return;
+    const t = setTimeout(() => setStatus(null), 5000);
+    return () => clearTimeout(t);
+  }, [status]);
 
   // Загрузка опубликованного плана при открытии по ссылке.
   useEffect(() => {
@@ -347,9 +363,9 @@ export default function App() {
     try {
       const h = await saveToFile(data, handle);
       if (h) setHandle(h);
-      setStatus('Сохранено в файл');
+      setStatus({ text: 'Сохранено в файл', kind: 'ok' });
     } catch {
-      setStatus('Сохранение отменено');
+      setStatus({ text: 'Сохранение отменено', kind: 'ok' });
     }
   };
 
@@ -358,28 +374,38 @@ export default function App() {
       const { data: loaded, handle: h } = await openFromFile();
       setData(loaded);
       setHandle(h);
-      setStatus('Загружено из файла');
+      setStatus({ text: 'Загружено из файла', kind: 'ok' });
     } catch {
-      setStatus('Загрузка отменена');
+      setStatus({ text: 'Загрузка отменена', kind: 'ok' });
     }
   };
 
   // Опубликовать план и получить постоянную ссылку для коллег (только просмотр).
+  // Пока публикация идёт, кнопка заблокирована — двойной клик не даст два POST.
   const onShare = async () => {
+    if (sharingRef.current) return;
+    sharingRef.current = true;
+    setSharing(true);
+    setStatus(null);
     try {
-      setStatus('Публикую…');
       const id = await publishPlan(data);
       const url = shareUrl(id);
       setShareLink(url);
       try {
         await navigator.clipboard?.writeText(url);
-        setStatus('Ссылка скопирована — отправьте коллегам');
+        setStatus({ text: 'Ссылка скопирована — отправьте коллегам', kind: 'ok' });
       } catch {
-        setStatus('Ссылка готова — скопируйте её ниже');
+        setStatus({ text: 'Ссылка готова — скопируйте её ниже', kind: 'ok' });
       }
     } catch {
       setShareLink('');
-      setStatus('Не удалось опубликовать. Подключено ли хранилище в Vercel?');
+      setStatus({
+        text: 'Не удалось опубликовать. Подключено ли хранилище в Vercel?',
+        kind: 'error',
+      });
+    } finally {
+      sharingRef.current = false;
+      setSharing(false);
     }
   };
 
@@ -464,7 +490,10 @@ export default function App() {
             </a>
           </div>
         ) : (
-          <div className="ml-auto flex items-center gap-2">
+          /* Тулбар в три группы: план (работа с данными), файл, шаринг.
+             «Демо» — за отдельным разделителем и приглушённая, чтобы не
+             перепутать с рабочей кнопкой. */
+          <div className="ml-auto flex flex-wrap items-center gap-2">
             <label className="flex items-center gap-1 text-sm text-slate-500">
               Горизонт:
               <input
@@ -525,17 +554,32 @@ export default function App() {
                 Сбросить закрепления
               </button>
             )}
+
+            <span className="h-6 w-px bg-slate-300" aria-hidden />
+
             <button
               onClick={onSave}
               className="rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100"
+              title="Сохранить план в файл"
             >
               Сохранить
             </button>
             <button
               onClick={onLoad}
               className="rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100"
+              title="Загрузить план из файла"
             >
               Загрузить
+            </button>
+            <button
+              onClick={() => {
+                downloadMarkdown(data, result);
+                setStatus({ text: 'Выгружено в team-plan.md', kind: 'ok' });
+              }}
+              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100"
+              title="Скачать план таблицей в markdown (.md)"
+            >
+              Экспорт .md
             </button>
             <button
               onClick={() => setShowReport(true)}
@@ -544,30 +588,28 @@ export default function App() {
             >
               Отчёт
             </button>
-            <button
-              onClick={() => {
-                downloadMarkdown(data, result);
-                setStatus('Выгружено в team-plan.md');
-              }}
-              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100"
-              title="Скачать план таблицей в markdown (.md)"
-            >
-              Экспорт .md
-            </button>
+
+            <span className="h-6 w-px bg-slate-300" aria-hidden />
+
             <button
               onClick={onShare}
-              className="rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700"
+              disabled={sharing}
+              className="rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-wait disabled:opacity-60"
               title="Опубликовать план и получить ссылку для коллег (только просмотр)"
             >
-              Поделиться
+              {sharing ? 'Публикую…' : 'Поделиться'}
             </button>
+
+            <span className="h-6 w-px bg-slate-300" aria-hidden />
+
             <button
               onClick={() => {
                 setData(makeSampleData());
                 setHandle(null);
-                setStatus('Сброшено к демо-данным');
+                setStatus({ text: 'Сброшено к демо-данным', kind: 'ok' });
               }}
-              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm text-slate-500 hover:bg-slate-100"
+              className="rounded-md border border-dashed border-slate-300 px-3 py-1.5 text-sm text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+              title="Заменить текущий план демо-данными"
             >
               Демо
             </button>
@@ -591,8 +633,26 @@ export default function App() {
       )}
 
       {(status || !hasFileSystemAccess()) && (
-        <div className="flex items-center gap-3 text-xs">
-          {status && <span className="text-slate-500">{status}</span>}
+        <div className="flex flex-wrap items-center gap-3 text-xs">
+          {status &&
+            (status.kind === 'error' ? (
+              <span
+                role="alert"
+                className="flex items-center gap-2 rounded-md border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-rose-700"
+              >
+                <span aria-hidden>⚠</span>
+                {status.text}
+                <button
+                  onClick={() => setStatus(null)}
+                  title="Закрыть сообщение"
+                  className="ml-1 font-medium text-rose-400 hover:text-rose-700"
+                >
+                  ✕
+                </button>
+              </span>
+            ) : (
+              <span className="text-slate-500">{status.text}</span>
+            ))}
           {!hasFileSystemAccess() && (
             <span className="text-amber-600">
               Браузер не поддерживает прямую запись в файл — используется
