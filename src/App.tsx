@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { AppData, Employee, Specialization, Task } from './types';
 import { schedule } from './engine/scheduler';
-import { parseISO, SHORT_MONTHS, SHORT_WEEKDAYS } from './engine/dates';
+import { completeTask, reopenTask } from './engine/complete';
+import { formatISO, parseISO, SHORT_MONTHS, SHORT_WEEKDAYS } from './engine/dates';
 import { GanttChart } from './components/GanttChart';
 import { TaskForm } from './components/TaskForm';
 import { EmployeeManager } from './components/EmployeeManager';
-import { PRIORITY_STYLE } from './components/stageStyle';
+import { ReportModal } from './components/ReportModal';
+import { PRIORITY_STYLE, UNAVAILABLE_STRIPES } from './components/stageStyle';
 import { makeSampleData } from './data/sampleData';
 import {
   saveToFile,
@@ -22,6 +24,7 @@ import {
   planIdFromUrl,
 } from './storage/shareStorage';
 import { downloadMarkdown } from './export/markdownExport';
+import { downloadReleasesCsv } from './export/csvExport';
 
 function formatFull(iso: string | null): string {
   if (!iso) return '—';
@@ -67,11 +70,18 @@ export default function App() {
   const [showForm, setShowForm] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [showTeam, setShowTeam] = useState(false);
+  // Модалка «Отчёт за период» — доступна и в режиме просмотра по ссылке.
+  const [showReport, setShowReport] = useState(false);
   const [status, setStatus] = useState<string>('');
   const [shareLink, setShareLink] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(readOnly);
   const [loadError, setLoadError] = useState<boolean>(false);
   const [showReleases, setShowReleases] = useState<boolean>(loadShowReleases);
+  // Фокус-режим: гант разворачивается на всё окно (оверлей), Esc — выход.
+  // Осознанное действие на сеанс, поэтому в localStorage не запоминаем.
+  const [ganttFull, setGanttFull] = useState(false);
+  // Секция «Завершённые» в таблице релизов: свёрнута по умолчанию.
+  const [showDone, setShowDone] = useState(false);
 
   const toggleReleases = () =>
     setShowReleases((v) => {
@@ -103,10 +113,34 @@ export default function App() {
 
   const visibleDays = data.horizonWeeks * 5;
 
+  // Счётчик в шапке: завершённые не смешиваем с задачами в работе.
+  const activeTaskCount = data.tasks.filter((t) => !t.done).length;
+  const doneTaskCount = data.tasks.length - activeTaskCount;
+  const taskCountLabel =
+    `${data.employees.length} чел · ${activeTaskCount} задач` +
+    (doneTaskCount > 0 ? ` · ${doneTaskCount} завершено` : '');
+
   const releasesSorted = useMemo(
     () => [...result.releases].sort((a, b) => a.qaEndIndex - b.qaEndIndex),
     [result.releases],
   );
+
+  // Таблица: активные — сверху как раньше, завершённые — в свёрнутую секцию
+  // (свежезавершённые первыми).
+  const activeReleases = useMemo(
+    () => releasesSorted.filter((r) => !r.done),
+    [releasesSorted],
+  );
+  const doneReleases = useMemo(() => {
+    const completedAt = new Map(data.tasks.map((t) => [t.id, t.completedAt ?? '']));
+    return releasesSorted
+      .filter((r) => r.done)
+      .sort((a, b) =>
+        (completedAt.get(b.taskId) ?? '').localeCompare(
+          completedAt.get(a.taskId) ?? '',
+        ),
+      );
+  }, [releasesSorted, data.tasks]);
 
   // Последний видимый день горизонта — для пометки «за горизонтом».
   const lastVisibleDate = result.days[visibleDays - 1] ?? null;
@@ -127,6 +161,19 @@ export default function App() {
 
   const deleteTask = (id: string) =>
     setData((d) => ({ ...d, tasks: d.tasks.filter((t) => t.id !== id) }));
+
+  // Отметить задачу завершённой: этапы замораживаются на текущих датах,
+  // блоки на ганте сереют, строка уезжает в секцию «Завершённые».
+  const markDone = (taskId: string) => {
+    pushUndo();
+    setData(completeTask(data, result, taskId, formatISO(new Date())));
+  };
+
+  // Вернуть завершённую в работу (закрепления этапов остаются на месте).
+  const markActive = (taskId: string) => {
+    pushUndo();
+    setData(reopenTask(data, taskId));
+  };
 
   const setPriority = (id: string, priority: number) =>
     setData((d) => ({
@@ -192,6 +239,19 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey);
   });
 
+  // Esc — выход из фокус-режима ганта. Модалки (z-50) открываются поверх
+  // оверлея (z-40), поэтому пока открыта модалка, Esc фокус-режим не трогает.
+  useEffect(() => {
+    if (!ganttFull) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (showForm || editingTask || showTeam || showReport) return;
+      setGanttFull(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [ganttFull, showForm, editingTask, showTeam, showReport]);
+
   // Перетащили этап на сотрудника и день — закрепляем вручную.
   const moveStage = (stageId: string, employeeId: string, isoDate: string) => {
     pushUndo();
@@ -222,8 +282,19 @@ export default function App() {
     }));
   };
 
+  // Alt+двойной клик по блоку на ганте — открыть задачу на редактирование.
+  const editTaskById = (taskId: string) => {
+    const task = data.tasks.find((t) => t.id === taskId);
+    if (task) setEditingTask(task);
+  };
+
+  // Завершённые не в счёт: их закрепления — заморозка истории, а не ручные
+  // перетаскивания, «Сбросить закрепления» их не трогает.
   const hasPins = useMemo(
-    () => data.tasks.some((t) => t.stages.some((s) => s.pinnedStartDate)),
+    () =>
+      data.tasks.some(
+        (t) => !t.done && t.stages.some((s) => s.pinnedStartDate),
+      ),
     [data.tasks],
   );
 
@@ -232,10 +303,14 @@ export default function App() {
     pushUndo();
     setData((d) => ({
       ...d,
-      tasks: d.tasks.map((t) => ({
-        ...t,
-        stages: t.stages.map((s) => ({ ...s, pinnedStartDate: null })),
-      })),
+      tasks: d.tasks.map((t) =>
+        t.done
+          ? t
+          : {
+              ...t,
+              stages: t.stages.map((s) => ({ ...s, pinnedStartDate: null })),
+            },
+      ),
     }));
   };
 
@@ -310,6 +385,19 @@ export default function App() {
 
   const noop = () => {};
 
+  // Гант один и тот же в обычном виде и в фокус-режиме — меняется только обёртка.
+  const ganttEl = (
+    <GanttChart
+      data={data}
+      result={result}
+      showReleases={showReleases}
+      fillHeight={ganttFull}
+      onMoveStage={readOnly ? noop : moveStage}
+      onUnpinStage={readOnly ? noop : unpinStage}
+      onEditTask={readOnly ? noop : editTaskById}
+    />
+  );
+
   if (loading) {
     return (
       <div className="flex min-h-full items-center justify-center p-10 text-slate-500">
@@ -340,15 +428,27 @@ export default function App() {
     <div className="mx-auto flex min-h-full max-w-[1400px] flex-col gap-4 p-5">
       <header className="flex flex-wrap items-center gap-3">
         <h1 className="text-xl font-bold text-slate-800">Планировщик ресурсов</h1>
-        <span className="text-sm text-slate-400">
-          {data.employees.length} чел · {data.tasks.length} задач
-        </span>
+        <span className="text-sm text-slate-400">{taskCountLabel}</span>
 
         {readOnly ? (
           <div className="ml-auto flex items-center gap-3">
             <span className="rounded-full bg-slate-100 px-3 py-1 text-sm text-slate-600">
               👁 Просмотр — только чтение
             </span>
+            <button
+              onClick={() => setGanttFull(true)}
+              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100"
+              title="Развернуть гант на всё окно (Esc — выход)"
+            >
+              ⛶ Гант на весь экран
+            </button>
+            <button
+              onClick={() => setShowReport(true)}
+              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100"
+              title="Отчёт за период: кто чем занят, загрузка, старты и релизы"
+            >
+              Отчёт
+            </button>
             <button
               onClick={() => downloadMarkdown(data, result)}
               className="rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100"
@@ -381,6 +481,13 @@ export default function App() {
               />
               нед.
             </label>
+            <button
+              onClick={() => setGanttFull(true)}
+              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100"
+              title="Развернуть гант на всё окно (Esc — выход)"
+            >
+              ⛶
+            </button>
             <button
               onClick={() => setShowTeam(true)}
               className="rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100"
@@ -429,6 +536,13 @@ export default function App() {
               className="rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100"
             >
               Загрузить
+            </button>
+            <button
+              onClick={() => setShowReport(true)}
+              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100"
+              title="Отчёт за период: кто чем занят, загрузка, старты и релизы"
+            >
+              Отчёт
             </button>
             <button
               onClick={() => {
@@ -499,13 +613,72 @@ export default function App() {
         </div>
       )}
 
-      <GanttChart
-        data={data}
-        result={result}
-        showReleases={showReleases}
-        onMoveStage={readOnly ? noop : moveStage}
-        onUnpinStage={readOnly ? noop : unpinStage}
-      />
+      {!ganttFull ? (
+        ganttEl
+      ) : (
+        /* Фокус-режим: гант на всё окно, сверху — узкая панель с нужными
+           при работе с гантом контролами. Модалки задач открываются поверх. */
+        <div className="fixed inset-0 z-40 flex flex-col gap-2 bg-slate-50 p-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-semibold text-slate-700">
+              Планировщик ресурсов
+            </span>
+            <span className="text-xs text-slate-400">{taskCountLabel}</span>
+            {!readOnly && (
+              <>
+                <label className="ml-2 flex items-center gap-1 text-sm text-slate-500">
+                  Горизонт:
+                  <input
+                    type="number"
+                    min={1}
+                    max={52}
+                    value={data.horizonWeeks}
+                    onChange={(e) =>
+                      setHorizonWeeks(
+                        Math.min(52, Math.max(1, Number(e.target.value) || 1)),
+                      )
+                    }
+                    className="w-16 rounded border border-slate-300 px-2 py-1 text-center tabular-nums"
+                  />
+                  нед.
+                </label>
+                <button
+                  onClick={undo}
+                  disabled={undoStack.length === 0}
+                  title="Отменить (Ctrl+Z)"
+                  className="rounded-md border border-slate-300 px-3 py-1 text-sm hover:bg-slate-100 disabled:opacity-40"
+                >
+                  ↶
+                </button>
+                <button
+                  onClick={redo}
+                  disabled={redoStack.length === 0}
+                  title="Повторить (Ctrl+Shift+Z)"
+                  className="rounded-md border border-slate-300 px-3 py-1 text-sm hover:bg-slate-100 disabled:opacity-40"
+                >
+                  ↷
+                </button>
+              </>
+            )}
+            <label className="flex cursor-pointer select-none items-center gap-1.5 text-sm text-slate-500">
+              <input
+                type="checkbox"
+                checked={showReleases}
+                onChange={toggleReleases}
+                className="accent-emerald-600"
+              />
+              🚀 Релизы
+            </label>
+            <button
+              onClick={() => setGanttFull(false)}
+              className="ml-auto rounded-md border border-slate-300 px-3 py-1 text-sm hover:bg-slate-100"
+            >
+              ✕ Свернуть (Esc)
+            </button>
+          </div>
+          <div className="min-h-0 flex-1">{ganttEl}</div>
+        </div>
+      )}
 
       {/* Легенда */}
       <div className="flex flex-wrap items-center gap-4 text-xs text-slate-500">
@@ -514,6 +687,17 @@ export default function App() {
         <Legend color="bg-amber-400" label="Ревью кода" />
         <Legend color="bg-emerald-500" label="QA" />
         <Legend color="bg-red-500/15 ring-2 ring-inset ring-red-500" label="Перегрузка (наложение)" />
+        <Legend
+          color="bg-slate-200 ring-1 ring-inset ring-slate-300"
+          label="Завершена"
+        />
+        <span className="flex items-center gap-1.5">
+          <span
+            className="inline-block h-3 w-3 rounded-sm bg-slate-200/50"
+            style={{ backgroundImage: UNAVAILABLE_STRIPES }}
+          />
+          Отпуск / недоступность
+        </span>
         <label className="flex cursor-pointer select-none items-center gap-1.5">
           <input
             type="checkbox"
@@ -525,16 +709,27 @@ export default function App() {
         </label>
         <span className="text-slate-400">
           Перетащите этап на другого человека или день, чтобы закрепить вручную.
-          Двойной клик по закреплённому блоку — снять закрепление. Ctrl+Z —
+          Двойной клик по закреплённому блоку — снять закрепление.
+          Alt+двойной клик по блоку — редактировать задачу. Ctrl+Z —
           отменить последнее действие.
         </span>
       </div>
 
       {/* Релизы */}
       <section className="rounded-lg border border-slate-200 bg-white">
-        <h2 className="border-b border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700">
-          Задачи и даты релизов
-        </h2>
+        <div className="flex items-center justify-between border-b border-slate-200 px-4 py-2">
+          <h2 className="text-sm font-semibold text-slate-700">
+            Задачи и даты релизов
+          </h2>
+          <button
+            onClick={() => downloadReleasesCsv(activeReleases, data.tasks)}
+            disabled={activeReleases.length === 0}
+            title="Скачать таблицу как CSV (для Excel); завершённые не выгружаются"
+            className="rounded-md border border-slate-300 px-3 py-1 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-40"
+          >
+            Экспорт в CSV
+          </button>
+        </div>
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-xs text-slate-400">
@@ -546,7 +741,7 @@ export default function App() {
             </tr>
           </thead>
           <tbody>
-            {releasesSorted.map((rel) => {
+            {activeReleases.map((rel) => {
               const task = data.tasks.find((t) => t.id === rel.taskId)!;
               const beyond =
                 rel.releaseDate !== null &&
@@ -589,6 +784,13 @@ export default function App() {
                     {!readOnly && (
                       <span className="flex items-center justify-end gap-3">
                         <button
+                          onClick={() => markDone(rel.taskId)}
+                          title="Отметить завершённой: этапы замрут на своих датах и посереют на ганте"
+                          className="text-xs text-slate-400 hover:text-emerald-600"
+                        >
+                          ✓ завершить
+                        </button>
+                        <button
                           onClick={() => setEditingTask(task)}
                           className="text-xs text-slate-400 hover:text-sky-600"
                         >
@@ -606,6 +808,68 @@ export default function App() {
                 </tr>
               );
             })}
+
+            {/* Завершённые: свёрнутая секция-архив в конце таблицы. */}
+            {doneReleases.length > 0 && (
+              <tr className="border-t border-slate-200 bg-slate-50">
+                <td colSpan={5} className="px-4 py-1.5">
+                  <button
+                    onClick={() => setShowDone((v) => !v)}
+                    className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-700"
+                  >
+                    <span className="inline-block w-3 text-center">
+                      {showDone ? '▾' : '▸'}
+                    </span>
+                    Завершённые ({doneReleases.length})
+                  </button>
+                </td>
+              </tr>
+            )}
+            {showDone &&
+              doneReleases.map((rel) => {
+                const task = data.tasks.find((t) => t.id === rel.taskId)!;
+                return (
+                  <tr
+                    key={rel.taskId}
+                    className="border-t border-slate-100 text-slate-400"
+                  >
+                    <td className="px-4 py-2 text-center">✓</td>
+                    <td className="px-4 py-2">
+                      <span className="line-through">{rel.taskName}</span>
+                      {task.completedAt && (
+                        <span className="ml-2 text-[10px]">
+                          завершена {formatFull(task.completedAt)}
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-2 tabular-nums">
+                      {formatFull(rel.qaEndDate)}
+                    </td>
+                    <td className="px-4 py-2 tabular-nums">
+                      {formatRelease(rel.releaseDate)}
+                    </td>
+                    <td className="px-4 py-2 text-right">
+                      {!readOnly && (
+                        <span className="flex items-center justify-end gap-3">
+                          <button
+                            onClick={() => markActive(rel.taskId)}
+                            title="Снять отметку о завершении: задача снова участвует в планировании"
+                            className="text-xs text-slate-400 hover:text-sky-600"
+                          >
+                            ↩ вернуть в работу
+                          </button>
+                          <button
+                            onClick={() => deleteTask(rel.taskId)}
+                            className="text-xs text-slate-400 hover:text-rose-600"
+                          >
+                            удалить
+                          </button>
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
           </tbody>
         </table>
       </section>
@@ -627,6 +891,10 @@ export default function App() {
           onAdd={updateTask}
           onClose={() => setEditingTask(null)}
         />
+      )}
+
+      {showReport && (
+        <ReportModal data={data} result={result} onClose={() => setShowReport(false)} />
       )}
 
       {showTeam && (

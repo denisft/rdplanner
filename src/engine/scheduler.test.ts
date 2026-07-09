@@ -259,6 +259,104 @@ describe('schedule', () => {
     expect(byDay.get(1)!.length).toBe(2);
   });
 
+  it('этап завершённой задачи продолжает занимать человека', () => {
+    const data = base(
+      [
+        {
+          id: 'done',
+          name: 'Done',
+          priority: 1,
+          done: true,
+          completedAt: '2026-06-05',
+          stages: [
+            {
+              id: 'sd',
+              type: 'development',
+              durationDays: 2,
+              assigneeId: 'dev',
+              pinnedStartDate: '2026-06-01', // индексы 0-1 (заморожен при завершении)
+            },
+          ],
+        },
+        {
+          id: 'active',
+          name: 'Active',
+          priority: 1,
+          stages: [
+            { id: 'sa', type: 'development', durationDays: 2, assigneeId: 'dev' },
+          ],
+        },
+      ],
+      [emp('dev')],
+    );
+    const r = schedule(data);
+    const doneStage = r.scheduledStages.find((s) => s.stageId === 'sd')!;
+    const active = r.scheduledStages.find((s) => s.stageId === 'sa')!;
+    expect(doneStage.done).toBe(true);
+    expect(active.done).toBe(false);
+    // Активная обтекает замороженную — дни 0-1 честно заняты.
+    expect(active.startIndex).toBe(2);
+    expect(r.releases.find((x) => x.taskId === 'done')!.done).toBe(true);
+  });
+
+  it('закреплённый этап завершённой задачи за началом горизонта выпадает из расчёта', () => {
+    const data = base(
+      [
+        {
+          id: 'done',
+          name: 'Old',
+          priority: 1,
+          done: true,
+          completedAt: '2026-05-20',
+          stages: [
+            {
+              id: 'sd',
+              type: 'development',
+              durationDays: 2,
+              assigneeId: 'dev',
+              pinnedStartDate: '2026-05-18', // раньше horizonStart 2026-06-01
+            },
+          ],
+        },
+        {
+          id: 'active',
+          name: 'Active',
+          priority: 1,
+          stages: [
+            { id: 'sa', type: 'development', durationDays: 2, assigneeId: 'dev' },
+          ],
+        },
+      ],
+      [emp('dev')],
+    );
+    const r = schedule(data);
+    const doneStage = r.scheduledStages.find((s) => s.stageId === 'sd')!;
+    // Прошлое не «воскресает»: этап не размещён и никого не занимает.
+    expect(doneStage.startIndex).toBe(-1);
+    expect(r.scheduledStages.find((s) => s.stageId === 'sa')!.startIndex).toBe(0);
+    expect(r.occupancy.get('dev')!.get(0)!.length).toBe(1);
+    expect(r.warnings).toHaveLength(0);
+  });
+
+  it('по завершённой задаче не выдаёт предупреждений', () => {
+    const data = base(
+      [
+        {
+          id: 'done',
+          name: 'Done',
+          priority: 1,
+          done: true,
+          stages: [
+            // Без исполнителя: у активной задачи это дало бы предупреждение.
+            { id: 'sd', type: 'qa', durationDays: 1, assigneeId: null },
+          ],
+        },
+      ],
+      [emp('dev')],
+    );
+    expect(schedule(data).warnings).toHaveLength(0);
+  });
+
   it('считает дату релиза по последнему этапу', () => {
     const data = base(
       [

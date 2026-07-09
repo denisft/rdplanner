@@ -36,7 +36,8 @@ export function buildMarkdown(data: AppData, result: ScheduleResult): string {
     '| --- | --- | --- | --- | --- |';
 
   // result.releases уже в порядке приоритета задач (как их раскладывал движок).
-  const rows = result.releases.flatMap((rel) => {
+  // Завершённые задачи в выгрузку не идут — это план работы, а не архив.
+  const rows = result.releases.filter((rel) => !rel.done).flatMap((rel) => {
     // Этапы задачи в порядке начала (нераспределённые — в конец).
     const stages = [...(stagesByTask.get(rel.taskId) ?? [])].sort((a, b) => {
       if (a.startIndex < 0) return 1;

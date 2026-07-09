@@ -3,9 +3,15 @@ import type { AppData, Employee, Specialization, StageType } from '../types';
 import { SPECIALIZATION_LABELS, SPECIALIZATION_ORDER, STAGE_LABELS } from '../types';
 import type { ScheduleResult, ScheduledStage } from '../engine/scheduler';
 import { overloadedDays } from '../engine/scheduler';
-import { parseISO, formatISO, shortLabel, SHORT_MONTHS } from '../engine/dates';
+import {
+  parseISO,
+  formatISO,
+  shortLabel,
+  rangeToIndices,
+  SHORT_MONTHS,
+} from '../engine/dates';
 import { stageAllows } from '../roles';
-import { STAGE_STYLE } from './stageStyle';
+import { DONE_STAGE_STYLE, STAGE_STYLE, UNAVAILABLE_STRIPES } from './stageStyle';
 
 const CELL = 34; // ширина колонки дня, px
 const NAME_W = 200; // ширина колонки с именем
@@ -16,10 +22,15 @@ interface Props {
   result: ScheduleResult;
   /** Показывать ли маркеры релизов (🚀) поверх сетки. */
   showReleases: boolean;
+  /** Занять всю высоту родителя со своим вертикальным скроллом
+      (полноэкранный режим); иначе — обычная карточка со скроллом по X. */
+  fillHeight?: boolean;
   /** Перетащить этап на сотрудника и день (закрепляет вручную). */
   onMoveStage: (stageId: string, employeeId: string, isoDate: string) => void;
   /** Снять ручное закрепление (вернуть в авторежим). */
   onUnpinStage: (stageId: string) => void;
+  /** Открыть задачу на редактирование (Alt+двойной клик по блоку). */
+  onEditTask: (taskId: string) => void;
 }
 
 /** Этап, разложенный на дорожку, с обрезкой по видимому горизонту. */
@@ -49,8 +60,10 @@ export function GanttChart({
   data,
   result,
   showReleases,
+  fillHeight = false,
   onMoveStage,
   onUnpinStage,
+  onEditTask,
 }: Props) {
   const [draggingType, setDraggingType] = useState<StageType | null>(null);
   // Выбранная задача: подсвечиваем все её этапы (архитектура/разработка/ревью/QA),
@@ -98,7 +111,8 @@ export function GanttChart({
   const releaseMarkers = new Map<number, string[]>();
   const beyondReleases: { name: string; date: string }[] = [];
   for (const r of result.releases) {
-    if (!r.releaseDate) continue;
+    // Релизы завершённых задач не показываем — их ракеты только шумели бы.
+    if (r.done || !r.releaseDate) continue;
     const idx = days.indexOf(r.releaseDate);
     if (idx === -1) {
       if (lastVisibleISO && r.releaseDate > lastVisibleISO) {
@@ -113,13 +127,19 @@ export function GanttChart({
   beyondReleases.sort((a, b) => a.date.localeCompare(b.date));
 
   return (
-    <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
+    <div
+      className={`rounded-lg border border-slate-200 bg-white ${
+        fillHeight ? 'h-full overflow-auto' : 'overflow-x-auto'
+      }`}
+    >
       <div style={{ width: totalWidth }} className="relative text-xs">
-        {/* Шапка: недели */}
+        {/* Шапка: недели. Левая ячейка прилипает к краю при горизонтальной
+            прокрутке: z-30 — выше слоя маркеров (z-20), чтобы линии «сегодня»
+            и релизов прятались под колонку, а не рисовались поверх имён. */}
         <div className="flex border-b border-slate-200 bg-slate-50">
           <div
             style={{ width: NAME_W }}
-            className="shrink-0 px-3 py-1 font-medium text-slate-500"
+            className="sticky left-0 z-30 shrink-0 bg-slate-50 px-3 py-1 font-medium text-slate-500"
           >
             Сотрудник
           </div>
@@ -136,7 +156,10 @@ export function GanttChart({
 
         {/* Шапка: дни */}
         <div className="flex border-b border-slate-200 bg-white">
-          <div style={{ width: NAME_W }} className="shrink-0" />
+          <div
+            style={{ width: NAME_W }}
+            className="sticky left-0 z-30 shrink-0 bg-white"
+          />
           {days.map((iso, i) => {
             const d = parseISO(iso);
             const weekStart = i % 5 === 0;
@@ -161,8 +184,13 @@ export function GanttChart({
           if (emps.length === 0) return null;
           return (
             <div key={spec}>
-              <div className="bg-slate-100 px-3 py-1 font-semibold text-slate-700">
-                {SPECIALIZATION_LABELS[spec]}
+              <div className="flex bg-slate-100">
+                <div
+                  style={{ width: NAME_W }}
+                  className="sticky left-0 z-30 shrink-0 bg-slate-100 px-3 py-1 font-semibold text-slate-700"
+                >
+                  {SPECIALIZATION_LABELS[spec]}
+                </div>
               </div>
               {emps.map((emp) => (
                 <EmployeeRow
@@ -176,6 +204,7 @@ export function GanttChart({
                   setSelectedTaskId={setSelectedTaskId}
                   onMoveStage={onMoveStage}
                   onUnpinStage={onUnpinStage}
+                  onEditTask={onEditTask}
                 />
               ))}
             </div>
@@ -343,6 +372,32 @@ function layoutRow(
   };
 }
 
+/**
+ * Недоступность сотрудника в координатах видимой сетки: непрерывные диапазоны
+ * для серой подложки + подсказка по каждому дню (даты исходного диапазона).
+ */
+function unavailableLayout(emp: Employee, days: string[]) {
+  const dayToIndex = new Map(days.map((d, i) => [d, i]));
+  const titles = new Map<number, string>();
+  for (const r of emp.unavailable) {
+    const label =
+      r.from === r.to
+        ? `Недоступен: ${shortLabel(r.from)}`
+        : `Недоступен: ${shortLabel(r.from)} – ${shortLabel(r.to)}`;
+    for (const idx of rangeToIndices(r.from, r.to, dayToIndex)) {
+      titles.set(idx, label);
+    }
+  }
+  // Дни -> непрерывные видимые диапазоны (пересекающиеся отпуска сливаются).
+  const spans: { from: number; to: number }[] = [];
+  for (const idx of [...titles.keys()].sort((a, b) => a - b)) {
+    const last = spans[spans.length - 1];
+    if (last && idx === last.to + 1) last.to = idx;
+    else spans.push({ from: idx, to: idx });
+  }
+  return { spans, titles };
+}
+
 function EmployeeRow({
   emp,
   days,
@@ -353,6 +408,7 @@ function EmployeeRow({
   setSelectedTaskId,
   onMoveStage,
   onUnpinStage,
+  onEditTask,
 }: {
   emp: Employee;
   days: string[];
@@ -363,8 +419,10 @@ function EmployeeRow({
   setSelectedTaskId: (id: string | null) => void;
   onMoveStage: (stageId: string, employeeId: string, isoDate: string) => void;
   onUnpinStage: (stageId: string) => void;
+  onEditTask: (taskId: string) => void;
 }) {
   const rowH = layout.laneCount * LANE_H;
+  const unavailable = unavailableLayout(emp, days);
   const droppable =
     draggingType !== null && stageAllows(draggingType, emp);
 
@@ -378,13 +436,17 @@ function EmployeeRow({
 
   return (
     <div
-      className={`flex border-b border-slate-100 ${
+      className={`group flex border-b border-slate-100 ${
         droppable ? 'bg-sky-50' : 'hover:bg-slate-50/60'
       }`}
     >
+      {/* Ячейка имени прилипает к левому краю; фон непрозрачный (при ховере и
+          drag&drop повторяет подсветку строки), z-30 — поверх сетки и маркеров. */}
       <div
         style={{ width: NAME_W, height: rowH }}
-        className="flex shrink-0 items-center justify-between gap-2 px-3"
+        className={`sticky left-0 z-30 flex shrink-0 items-center justify-between gap-2 px-3 ${
+          droppable ? 'bg-sky-50' : 'bg-white group-hover:bg-slate-50'
+        }`}
       >
         <span className="truncate text-slate-700" title={emp.name}>
           {emp.name}
@@ -418,6 +480,7 @@ function EmployeeRow({
               className={`h-full shrink-0 ${
                 i % 5 === 0 ? 'border-l border-slate-200' : ''
               }`}
+              title={unavailable.titles.get(i)}
               onDragOver={(e) => {
                 if (droppable) e.preventDefault();
               }}
@@ -425,6 +488,20 @@ function EmployeeRow({
             />
           ))}
         </div>
+
+        {/* Недоступность (отпуск/больничный): серая штриховка под блоками этапов.
+            pointer-events-none — drag&drop и подсказки работают через ячейки фона. */}
+        {unavailable.spans.map((u) => (
+          <div
+            key={u.from}
+            className="pointer-events-none absolute inset-y-0 bg-slate-200/50"
+            style={{
+              left: u.from * CELL,
+              width: (u.to - u.from + 1) * CELL,
+              backgroundImage: UNAVAILABLE_STRIPES,
+            }}
+          />
+        ))}
 
         {/* Блоки этапов: каждый — отдельный элемент на своей дорожке. */}
         {layout.stages.map(({ stage: s, lane, visStart, visEnd }) => {
@@ -435,18 +512,25 @@ function EmployeeRow({
           return (
             <div
               key={s.stageId}
-              draggable
+              draggable={!s.done}
               onClick={(e) => {
                 e.stopPropagation(); // не дать фону сбросить выбор
                 setSelectedTaskId(selected ? null : s.taskId);
               }}
               onDragStart={(e) => {
+                if (s.done) return;
                 e.dataTransfer.setData(DRAG_KEY, s.stageId);
                 e.dataTransfer.effectAllowed = 'move';
                 setDraggingType(s.type);
               }}
               onDragEnd={() => setDraggingType(null)}
-              onDoubleClick={() => s.pinned && onUnpinStage(s.stageId)}
+              onDoubleClick={(e) => {
+                // Alt+двойной клик — редактирование задачи, обычный — открепить.
+                // У завершённых открепление выключено, чтобы случайно не
+                // «разбудить» историю; редактирование остаётся доступным.
+                if (e.altKey) onEditTask(s.taskId);
+                else if (s.pinned && !s.done) onUnpinStage(s.stageId);
+              }}
               onDragOver={(e) => {
                 if (droppable) e.preventDefault();
               }}
@@ -461,19 +545,21 @@ function EmployeeRow({
                 top: lane * LANE_H + 2,
                 height: LANE_H - 4,
               }}
-              className={`absolute flex cursor-grab items-center rounded-sm transition-opacity ${
-                STAGE_STYLE[s.type]
-              } ${s.pinned ? 'border border-white/80' : ''} ${
+              className={`absolute flex items-center rounded-sm transition-opacity ${
+                s.done ? `cursor-default ${DONE_STAGE_STYLE}` : `cursor-grab ${STAGE_STYLE[s.type]}`
+              } ${s.pinned && !s.done ? 'border border-white/80' : ''} ${
                 selected ? 'z-10 ring-2 ring-slate-900 ring-offset-1' : ''
               } ${dimmed ? 'opacity-25' : ''}`}
               title={`${s.taskName} · ${STAGE_LABELS[s.type]}${
+                s.done ? '\n✓ задача завершена' : ''
+              }${
                 conflictsWith
                   ? '\nНАЛОЖЕНИЕ с: ' + conflictsWith.join('; ')
                   : ''
-              }${s.pinned ? '\nзакреплён (двойной клик — открепить)' : ''}`}
+              }${s.pinned && !s.done ? '\nзакреплён (двойной клик — открепить)' : ''}\nAlt+двойной клик — редактировать задачу`}
             >
               <span className="truncate px-1 text-[10px] font-medium leading-none">
-                {s.taskName}
+                {s.done ? `✓ ${s.taskName}` : s.taskName}
               </span>
             </div>
           );

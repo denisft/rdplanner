@@ -84,7 +84,14 @@ export function TaskForm({ employees, defaultPriority, initialTask, onAdd, onClo
         pinnedStartDate: existingStage?.pinnedStartDate ?? null,
       });
     }
-    onAdd({ id: initialTask?.id ?? uid(), name: name.trim(), priority, stages: built });
+    // Спред первым: у завершённой задачи сохраняются done/completedAt.
+    onAdd({
+      ...initialTask,
+      id: initialTask?.id ?? uid(),
+      name: name.trim(),
+      priority,
+      stages: built,
+    });
     onClose();
   };
 

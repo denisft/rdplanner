@@ -27,6 +27,8 @@ export interface ScheduledStage {
   endIndex: number;
   /** true — этап закреплён вручную (перетащен пользователем). */
   pinned: boolean;
+  /** true — задача завершена (блок рисуется приглушённым и не двигается). */
+  done: boolean;
 }
 
 export interface TaskRelease {
@@ -38,6 +40,8 @@ export interface TaskRelease {
   qaEndDate: string | null;
   /** Дата релиза — ближайший вт/чт строго после окончания QA. */
   releaseDate: string | null;
+  /** true — задача завершена (в таблице уходит в секцию архива). */
+  done: boolean;
 }
 
 export interface ScheduleResult {
@@ -144,10 +148,35 @@ export function schedule(data: AppData): ScheduleResult {
 
   // Проход 2: размещаем по порядку приоритета, обтекая закреплённые этапы.
   for (const task of orderedTasks) {
+    const done = !!task.done;
     let prevEnd = -1; // индекс окончания предыдущего этапа
     let taskEnd = -1;
 
     for (const stage of task.stages) {
+      // Этап завершённой задачи с закреплённой датой, уехавшей за начало
+      // горизонта, — прошлое: выкидываем из расчёта, а не переразмещаем,
+      // иначе он «воскрес» бы и снова занял человека.
+      if (
+        done &&
+        stage.pinnedStartDate &&
+        !pinned.has(stage.id) &&
+        stage.pinnedStartDate < data.horizonStart
+      ) {
+        scheduledStages.push({
+          stageId: stage.id,
+          taskId: task.id,
+          taskName: task.name,
+          type: stage.type,
+          assigneeId: stage.assigneeId,
+          priority: task.priority,
+          startIndex: -1,
+          endIndex: -1,
+          pinned: true,
+          done,
+        });
+        continue;
+      }
+
       const earliest = prevEnd + 1;
       const pin = pinned.get(stage.id);
       let startIndex: number;
@@ -169,9 +198,11 @@ export function schedule(data: AppData): ScheduleResult {
           maxIndex,
         );
         if (startIndex === -1) {
-          warnings.push(
-            `Не удалось разместить этап «${stage.type}» задачи «${task.name}» в пределах расчётного горизонта.`,
-          );
+          if (!done) {
+            warnings.push(
+              `Не удалось разместить этап «${stage.type}» задачи «${task.name}» в пределах расчётного горизонта.`,
+            );
+          }
         } else {
           for (let d = startIndex; d < startIndex + stage.durationDays; d++) {
             busy.add(d);
@@ -181,9 +212,12 @@ export function schedule(data: AppData): ScheduleResult {
       } else {
         // Без исполнителя ресурсного ограничения нет — кладём сразу после предыдущего.
         startIndex = earliest;
-        warnings.push(
-          `Этап «${stage.type}» задачи «${task.name}» без исполнителя — учтён по времени, но не занимает ничью загрузку.`,
-        );
+        // По завершённым задачам не ворчим — они уже сделаны.
+        if (!done) {
+          warnings.push(
+            `Этап «${stage.type}» задачи «${task.name}» без исполнителя — учтён по времени, но не занимает ничью загрузку.`,
+          );
+        }
       }
 
       const endIndex =
@@ -199,6 +233,7 @@ export function schedule(data: AppData): ScheduleResult {
         startIndex,
         endIndex,
         pinned: isPinned,
+        done,
       });
 
       if (endIndex >= 0) {
@@ -214,6 +249,7 @@ export function schedule(data: AppData): ScheduleResult {
       qaEndIndex: taskEnd,
       qaEndDate,
       releaseDate: qaEndDate ? nextReleaseDay(qaEndDate) : null,
+      done,
     });
   }
 
