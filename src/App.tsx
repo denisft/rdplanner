@@ -91,6 +91,27 @@ export default function App() {
   const [ganttFull, setGanttFull] = useState(false);
   // Секция «Завершённые» в таблице релизов: свёрнута по умолчанию.
   const [showDone, setShowDone] = useState(false);
+  // Меню «Файл» в тулбаре: редкие файловые операции собраны в дропдаун,
+  // закрывается по клику мимо или Esc.
+  const [showFileMenu, setShowFileMenu] = useState(false);
+  const fileMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!showFileMenu) return;
+    const onPointerDown = (e: MouseEvent) => {
+      if (!fileMenuRef.current?.contains(e.target as Node))
+        setShowFileMenu(false);
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setShowFileMenu(false);
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [showFileMenu]);
 
   const toggleReleases = () =>
     setShowReleases((v) => {
@@ -305,11 +326,14 @@ export default function App() {
   };
 
   // Завершённые не в счёт: их закрепления — заморозка истории, а не ручные
-  // перетаскивания, «Сбросить закрепления» их не трогает.
-  const hasPins = useMemo(
+  // перетаскивания, «Сбросить закрепления» их не трогает. Счётчик виден
+  // рядом с гантом — пользователь понимает, сколько этапов держит вручную.
+  const pinnedCount = useMemo(
     () =>
-      data.tasks.some(
-        (t) => !t.done && t.stages.some((s) => s.pinnedStartDate),
+      data.tasks.reduce(
+        (n, t) =>
+          t.done ? n : n + t.stages.filter((s) => s.pinnedStartDate).length,
+        0,
       ),
     [data.tasks],
   );
@@ -490,9 +514,9 @@ export default function App() {
             </a>
           </div>
         ) : (
-          /* Тулбар в три группы: план (работа с данными), файл, шаринг.
-             «Демо» — за отдельным разделителем и приглушённая, чтобы не
-             перепутать с рабочей кнопкой. */
+          /* Тулбар в три группы: вид, работа с планом, публикация. Всё,
+             что нажимается нечасто (сотрудники, отчёт, файловые операции,
+             демо), убрано в меню «Файл» — в ряду только ежедневное. */
           <div className="ml-auto flex flex-wrap items-center gap-2">
             <label className="flex items-center gap-1 text-sm text-slate-500">
               Горизонт:
@@ -517,12 +541,9 @@ export default function App() {
             >
               ⛶
             </button>
-            <button
-              onClick={() => setShowTeam(true)}
-              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100"
-            >
-              Сотрудники
-            </button>
+
+            <span className="h-6 w-px bg-slate-300" aria-hidden />
+
             <button
               onClick={() => setShowForm(true)}
               className="rounded-md bg-sky-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-sky-700"
@@ -535,7 +556,7 @@ export default function App() {
               title="Отменить (Ctrl+Z)"
               className="rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100 disabled:opacity-40"
             >
-              ↶ Отменить
+              ↶
             </button>
             <button
               onClick={redo}
@@ -543,54 +564,109 @@ export default function App() {
               title="Повторить (Ctrl+Shift+Z)"
               className="rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100 disabled:opacity-40"
             >
-              ↷ Повторить
+              ↷
             </button>
-            {hasPins && (
+
+            <span className="h-6 w-px bg-slate-300" aria-hidden />
+
+            <div ref={fileMenuRef} className="relative">
               <button
-                onClick={resetPins}
-                className="rounded-md border border-slate-300 px-3 py-1.5 text-sm text-slate-500 hover:bg-slate-100"
-                title="Снять все ручные закрепления и вернуть автопланирование"
+                onClick={() => setShowFileMenu((v) => !v)}
+                aria-haspopup="menu"
+                aria-expanded={showFileMenu}
+                className="rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100"
               >
-                Сбросить закрепления
+                Файл ▾
               </button>
-            )}
+              {showFileMenu && (
+                <div
+                  role="menu"
+                  className="absolute right-0 top-full z-30 mt-1 w-56 rounded-md border border-slate-200 bg-white py-1 text-sm shadow-lg"
+                >
+                  <button
+                    role="menuitem"
+                    onClick={() => {
+                      setShowFileMenu(false);
+                      setShowTeam(true);
+                    }}
+                    className="block w-full px-3 py-1.5 text-left hover:bg-slate-100"
+                    title="Команда: добавление, специализации, отпуска"
+                  >
+                    Сотрудники
+                  </button>
+                  <button
+                    role="menuitem"
+                    onClick={() => {
+                      setShowFileMenu(false);
+                      setShowReport(true);
+                    }}
+                    className="block w-full px-3 py-1.5 text-left hover:bg-slate-100"
+                    title="Отчёт за период: кто чем занят, загрузка, старты и релизы"
+                  >
+                    Отчёт за период
+                  </button>
 
-            <span className="h-6 w-px bg-slate-300" aria-hidden />
+                  <div className="my-1 border-t border-slate-200" aria-hidden />
 
-            <button
-              onClick={onSave}
-              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100"
-              title="Сохранить план в файл"
-            >
-              Сохранить
-            </button>
-            <button
-              onClick={onLoad}
-              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100"
-              title="Загрузить план из файла"
-            >
-              Загрузить
-            </button>
-            <button
-              onClick={() => {
-                downloadMarkdown(data, result);
-                setStatus({ text: 'Выгружено в team-plan.md', kind: 'ok' });
-              }}
-              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100"
-              title="Скачать план таблицей в markdown (.md)"
-            >
-              Экспорт .md
-            </button>
-            <button
-              onClick={() => setShowReport(true)}
-              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100"
-              title="Отчёт за период: кто чем занят, загрузка, старты и релизы"
-            >
-              Отчёт
-            </button>
+                  <button
+                    role="menuitem"
+                    onClick={() => {
+                      setShowFileMenu(false);
+                      onSave();
+                    }}
+                    className="block w-full px-3 py-1.5 text-left hover:bg-slate-100"
+                    title="Сохранить план в файл"
+                  >
+                    Сохранить в файл
+                  </button>
+                  <button
+                    role="menuitem"
+                    onClick={() => {
+                      setShowFileMenu(false);
+                      onLoad();
+                    }}
+                    className="block w-full px-3 py-1.5 text-left hover:bg-slate-100"
+                    title="Загрузить план из файла"
+                  >
+                    Загрузить из файла
+                  </button>
+                  <button
+                    role="menuitem"
+                    onClick={() => {
+                      setShowFileMenu(false);
+                      downloadMarkdown(data, result);
+                      setStatus({ text: 'Выгружено в team-plan.md', kind: 'ok' });
+                    }}
+                    className="block w-full px-3 py-1.5 text-left hover:bg-slate-100"
+                    title="Скачать план таблицей в markdown (.md)"
+                  >
+                    Экспорт .md
+                  </button>
 
-            <span className="h-6 w-px bg-slate-300" aria-hidden />
+                  <div className="my-1 border-t border-slate-200" aria-hidden />
 
+                  <button
+                    role="menuitem"
+                    onClick={() => {
+                      setShowFileMenu(false);
+                      if (!window.confirm('Заменить текущий план демо-данными?'))
+                        return;
+                      pushUndo();
+                      setData(makeSampleData());
+                      setHandle(null);
+                      setStatus({
+                        text: 'Сброшено к демо-данным. Ctrl+Z — вернуть свой план.',
+                        kind: 'ok',
+                      });
+                    }}
+                    className="block w-full px-3 py-1.5 text-left text-slate-500 hover:bg-slate-100"
+                    title="Заменить текущий план демо-данными"
+                  >
+                    Демо-данные…
+                  </button>
+                </div>
+              )}
+            </div>
             <button
               onClick={onShare}
               disabled={sharing}
@@ -598,20 +674,6 @@ export default function App() {
               title="Опубликовать план и получить ссылку для коллег (только просмотр)"
             >
               {sharing ? 'Публикую…' : 'Поделиться'}
-            </button>
-
-            <span className="h-6 w-px bg-slate-300" aria-hidden />
-
-            <button
-              onClick={() => {
-                setData(makeSampleData());
-                setHandle(null);
-                setStatus({ text: 'Сброшено к демо-данным', kind: 'ok' });
-              }}
-              className="rounded-md border border-dashed border-slate-300 px-3 py-1.5 text-sm text-slate-400 hover:bg-slate-100 hover:text-slate-600"
-              title="Заменить текущий план демо-данными"
-            >
-              Демо
             </button>
           </div>
         )}
@@ -718,6 +780,15 @@ export default function App() {
                 >
                   ↷
                 </button>
+                {pinnedCount > 0 && (
+                  <button
+                    onClick={resetPins}
+                    title="Снять все ручные закрепления и вернуть автопланирование"
+                    className="text-sm font-medium text-sky-600 hover:underline"
+                  >
+                    Сбросить закрепления ({pinnedCount})
+                  </button>
+                )}
               </>
             )}
             <label className="flex cursor-pointer select-none items-center gap-1.5 text-sm text-slate-500">
@@ -767,6 +838,15 @@ export default function App() {
           />
           🚀 Релизы на ганте
         </label>
+        {!readOnly && pinnedCount > 0 && (
+          <button
+            onClick={resetPins}
+            title="Снять все ручные закрепления и вернуть автопланирование"
+            className="font-medium text-sky-600 hover:underline"
+          >
+            Сбросить закрепления ({pinnedCount})
+          </button>
+        )}
         <span className="text-slate-400">
           Перетащите этап на другого человека или день, чтобы закрепить вручную.
           Двойной клик по закреплённому блоку — снять закрепление.
