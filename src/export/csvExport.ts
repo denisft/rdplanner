@@ -16,7 +16,7 @@ function formatDate(iso: string | null): string {
 }
 
 /** Экранирование по RFC 4180: кавычки, разделитель и переносы строк — в двойных кавычках. */
-function cell(value: string): string {
+export function cell(value: string): string {
   if (/[";\n\r]/.test(value)) {
     return `"${value.replace(/"/g, '""')}"`;
   }

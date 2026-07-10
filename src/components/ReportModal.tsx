@@ -12,6 +12,8 @@ import {
   buildReportMarkdown,
   downloadReportMarkdown,
 } from '../export/reportMarkdown';
+import { buildWeeklyLoadReport } from '../engine/weeklyLoad';
+import { downloadWeeklyLoadCsv } from '../export/weeklyLoadCsv';
 import { formatISO, parseISO, SHORT_MONTHS, SHORT_WEEKDAYS } from '../engine/dates';
 
 interface Props {
@@ -198,6 +200,16 @@ export function ReportModal({ data, result, onClose }: Props) {
               className="rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100 disabled:opacity-40"
             >
               Скачать .md
+            </button>
+            <button
+              onClick={() =>
+                downloadWeeklyLoadCsv(buildWeeklyLoadReport(data, result, from, to))
+              }
+              disabled={report.totalDays === 0}
+              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100 disabled:opacity-40"
+              title="CSV по неделям: эпик × сотрудник × % загрузки — открыть в Excel"
+            >
+              Скачать .csv
             </button>
           </span>
         </div>
