@@ -65,7 +65,13 @@ export function GanttChart({
   onUnpinStage,
   onEditTask,
 }: Props) {
-  const [draggingType, setDraggingType] = useState<StageType | null>(null);
+  // Что тащим: тип этапа (для проверки ролей) и текущий исполнитель — его
+  // строка принимает этап всегда, даже если по ролям он этап вести «не может»
+  // (иначе этап, назначенный вопреки ролям, было бы не сдвинуть по датам).
+  const [dragging, setDragging] = useState<{
+    type: StageType;
+    assigneeId: string | null;
+  } | null>(null);
   // Выбранная задача: подсвечиваем все её этапы (архитектура/разработка/ревью/QA),
   // остальные блоки притеняем. Клик по тому же этапу или по фону — снять выбор.
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
@@ -198,8 +204,8 @@ export function GanttChart({
                   emp={emp}
                   days={days}
                   layout={layoutRow(emp.id, days.length, result, stageById)}
-                  draggingType={draggingType}
-                  setDraggingType={setDraggingType}
+                  dragging={dragging}
+                  setDragging={setDragging}
                   selectedTaskId={selectedTaskId}
                   setSelectedTaskId={setSelectedTaskId}
                   onMoveStage={onMoveStage}
@@ -402,8 +408,8 @@ function EmployeeRow({
   emp,
   days,
   layout,
-  draggingType,
-  setDraggingType,
+  dragging,
+  setDragging,
   selectedTaskId,
   setSelectedTaskId,
   onMoveStage,
@@ -413,8 +419,8 @@ function EmployeeRow({
   emp: Employee;
   days: string[];
   layout: RowLayout;
-  draggingType: StageType | null;
-  setDraggingType: (t: StageType | null) => void;
+  dragging: { type: StageType; assigneeId: string | null } | null;
+  setDragging: (d: { type: StageType; assigneeId: string | null } | null) => void;
   selectedTaskId: string | null;
   setSelectedTaskId: (id: string | null) => void;
   onMoveStage: (stageId: string, employeeId: string, isoDate: string) => void;
@@ -423,15 +429,18 @@ function EmployeeRow({
 }) {
   const rowH = layout.laneCount * LANE_H;
   const unavailable = unavailableLayout(emp, days);
+  // Куда можно бросить: по ролям — или на текущего исполнителя (двигаем по
+  // датам, не меняя человека), чтобы этап не оказался «неперетаскиваемым».
   const droppable =
-    draggingType !== null && stageAllows(draggingType, emp);
+    dragging !== null &&
+    (stageAllows(dragging.type, emp) || dragging.assigneeId === emp.id);
 
   const dropOnDay = (e: React.DragEvent, dayIndex: number) => {
     const stageId = e.dataTransfer.getData(DRAG_KEY);
     if (stageId && droppable) {
       onMoveStage(stageId, emp.id, days[Math.min(dayIndex, days.length - 1)]);
     }
-    setDraggingType(null);
+    setDragging(null);
   };
 
   return (
@@ -521,9 +530,9 @@ function EmployeeRow({
                 if (s.done) return;
                 e.dataTransfer.setData(DRAG_KEY, s.stageId);
                 e.dataTransfer.effectAllowed = 'move';
-                setDraggingType(s.type);
+                setDragging({ type: s.type, assigneeId: s.assigneeId });
               }}
-              onDragEnd={() => setDraggingType(null)}
+              onDragEnd={() => setDragging(null)}
               onDoubleClick={(e) => {
                 // Alt+двойной клик — редактирование задачи, обычный — открепить.
                 // У завершённых открепление выключено, чтобы случайно не
