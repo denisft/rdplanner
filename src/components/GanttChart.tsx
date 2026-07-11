@@ -128,7 +128,7 @@ export function GanttChart({
 
   return (
     <div
-      className={`rounded-lg border border-slate-200 bg-white ${
+      className={`rounded-xl bg-white shadow-card ${
         fillHeight ? 'h-full overflow-auto' : 'overflow-x-auto'
       }`}
     >
@@ -437,7 +437,7 @@ function EmployeeRow({
   return (
     <div
       className={`group flex border-b border-slate-100 ${
-        droppable ? 'bg-sky-50' : 'hover:bg-slate-50/60'
+        droppable ? 'bg-primary-light' : 'hover:bg-slate-50/60'
       }`}
     >
       {/* Ячейка имени прилипает к левому краю; фон непрозрачный (при ховере и
@@ -445,7 +445,7 @@ function EmployeeRow({
       <div
         style={{ width: NAME_W, height: rowH }}
         className={`sticky left-0 z-30 flex shrink-0 items-center justify-between gap-2 px-3 ${
-          droppable ? 'bg-sky-50' : 'bg-white group-hover:bg-slate-50'
+          droppable ? 'bg-primary-light' : 'bg-white group-hover:bg-slate-50'
         }`}
       >
         <span className="truncate text-slate-700" title={emp.name}>
@@ -454,7 +454,7 @@ function EmployeeRow({
         <span className="flex shrink-0 items-center gap-1.5 text-[10px]">
           {layout.overloadDays > 0 && (
             <span
-              className="rounded bg-red-100 px-1 py-px font-semibold text-red-700"
+              className="rounded-full bg-error-light px-1.5 py-px font-semibold text-rose-700"
               title="Дней, когда на человеке больше одной задачи"
             >
               ⚠ {layout.overloadDays} дн
@@ -570,7 +570,7 @@ function EmployeeRow({
         {layout.conflicts.map((c) => (
           <div
             key={c.from}
-            className="pointer-events-none absolute inset-y-0 z-10 rounded-sm bg-red-500/15 ring-2 ring-inset ring-red-500"
+            className="pointer-events-none absolute inset-y-0 z-10 rounded-sm bg-error/15 ring-2 ring-inset ring-error"
             style={{ left: c.from * CELL, width: (c.to - c.from + 1) * CELL }}
           />
         ))}

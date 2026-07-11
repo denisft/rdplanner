@@ -466,7 +466,7 @@ export default function App() {
         </p>
         <a
           href={location.origin + location.pathname}
-          className="rounded-md bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-700"
+          className="rounded-full bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary/90"
         >
           Открыть свой планировщик
         </a>
@@ -476,7 +476,7 @@ export default function App() {
 
   return (
     <div className="mx-auto flex min-h-full max-w-[1400px] flex-col gap-4 p-5">
-      <header className="flex flex-wrap items-center gap-3">
+      <header className="flex flex-wrap items-center gap-3 rounded-xl bg-white px-5 py-3 shadow-card">
         <h1 className="text-xl font-bold text-slate-800">Планировщик ресурсов</h1>
         <span className="text-sm text-slate-400">{taskCountLabel}</span>
 
@@ -487,28 +487,28 @@ export default function App() {
             </span>
             <button
               onClick={() => setGanttFull(true)}
-              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100"
+              className="rounded-full border border-slate-300 px-3.5 py-1.5 text-sm hover:bg-slate-100"
               title="Развернуть гант на всё окно (Esc — выход)"
             >
               ⛶ Гант на весь экран
             </button>
             <button
               onClick={() => setShowReport(true)}
-              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100"
+              className="rounded-full border border-slate-300 px-3.5 py-1.5 text-sm hover:bg-slate-100"
               title="Отчёт за период: кто чем занят, загрузка, старты и релизы"
             >
               Отчёт
             </button>
             <button
               onClick={() => downloadMarkdown(data, result)}
-              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100"
+              className="rounded-full border border-slate-300 px-3.5 py-1.5 text-sm hover:bg-slate-100"
               title="Скачать план таблицей в markdown (.md)"
             >
               Экспорт .md
             </button>
             <a
               href={location.origin + location.pathname}
-              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100"
+              className="rounded-full border border-slate-300 px-3.5 py-1.5 text-sm hover:bg-slate-100"
             >
               Создать свой план
             </a>
@@ -530,13 +530,13 @@ export default function App() {
                     Math.min(52, Math.max(1, Number(e.target.value) || 1)),
                   )
                 }
-                className="w-16 rounded border border-slate-300 px-2 py-1 text-center tabular-nums"
+                className="w-16 rounded-lg border border-slate-300 px-2 py-1 text-center tabular-nums outline-none focus:border-primary"
               />
               нед.
             </label>
             <button
               onClick={() => setGanttFull(true)}
-              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100"
+              className="rounded-full border border-slate-300 px-3.5 py-1.5 text-sm hover:bg-slate-100"
               title="Развернуть гант на всё окно (Esc — выход)"
             >
               ⛶
@@ -546,7 +546,7 @@ export default function App() {
 
             <button
               onClick={() => setShowForm(true)}
-              className="rounded-md bg-sky-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-sky-700"
+              className="rounded-full bg-primary px-4 py-1.5 text-sm font-medium text-white hover:bg-primary/90"
             >
               + Задача
             </button>
@@ -554,7 +554,7 @@ export default function App() {
               onClick={undo}
               disabled={undoStack.length === 0}
               title="Отменить (Ctrl+Z)"
-              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100 disabled:opacity-40"
+              className="rounded-full border border-slate-300 px-3.5 py-1.5 text-sm hover:bg-slate-100 disabled:opacity-40"
             >
               ↶
             </button>
@@ -562,7 +562,7 @@ export default function App() {
               onClick={redo}
               disabled={redoStack.length === 0}
               title="Повторить (Ctrl+Shift+Z)"
-              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100 disabled:opacity-40"
+              className="rounded-full border border-slate-300 px-3.5 py-1.5 text-sm hover:bg-slate-100 disabled:opacity-40"
             >
               ↷
             </button>
@@ -574,14 +574,14 @@ export default function App() {
                 onClick={() => setShowFileMenu((v) => !v)}
                 aria-haspopup="menu"
                 aria-expanded={showFileMenu}
-                className="rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100"
+                className="rounded-full border border-slate-300 px-3.5 py-1.5 text-sm hover:bg-slate-100"
               >
                 Файл ▾
               </button>
               {showFileMenu && (
                 <div
                   role="menu"
-                  className="absolute right-0 top-full z-30 mt-1 w-56 rounded-md border border-slate-200 bg-white py-1 text-sm shadow-lg"
+                  className="absolute right-0 top-full z-30 mt-1 w-56 rounded-xl border border-slate-100 bg-white py-1.5 text-sm shadow-card"
                 >
                   <button
                     role="menuitem"
@@ -670,7 +670,7 @@ export default function App() {
             <button
               onClick={onShare}
               disabled={sharing}
-              className="rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-wait disabled:opacity-60"
+              className="rounded-full bg-secondary px-4 py-1.5 text-sm font-medium text-white hover:bg-secondary/90 disabled:cursor-wait disabled:opacity-60"
               title="Опубликовать план и получить ссылку для коллег (только просмотр)"
             >
               {sharing ? 'Публикую…' : 'Поделиться'}
@@ -680,15 +680,15 @@ export default function App() {
       </header>
 
       {shareLink && !readOnly && (
-        <div className="flex flex-wrap items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs">
-          <span className="font-medium text-emerald-700">Ссылка для коллег:</span>
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-teal-200 bg-success-light px-3 py-2 text-xs">
+          <span className="font-medium text-teal-700">Ссылка для коллег:</span>
           <input
             readOnly
             value={shareLink}
             onFocus={(e) => e.currentTarget.select()}
-            className="flex-1 rounded border border-emerald-200 bg-white px-2 py-1 text-slate-700"
+            className="flex-1 rounded-lg border border-teal-200 bg-white px-2 py-1 text-slate-700"
           />
-          <span className="text-emerald-600">
+          <span className="text-teal-600">
             обновляйте кнопкой «Поделиться» — ссылка не меняется
           </span>
         </div>
@@ -700,7 +700,7 @@ export default function App() {
             (status.kind === 'error' ? (
               <span
                 role="alert"
-                className="flex items-center gap-2 rounded-md border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-rose-700"
+                className="flex items-center gap-2 rounded-lg border border-error/40 bg-error-light px-2.5 py-1.5 text-rose-700"
               >
                 <span aria-hidden>⚠</span>
                 {status.text}
@@ -725,7 +725,7 @@ export default function App() {
       )}
 
       {result.warnings.length > 0 && (
-        <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+        <div className="rounded-xl border border-warning/40 bg-warning-light px-3 py-2 text-xs text-amber-700">
           {result.warnings.slice(0, 3).map((w, i) => (
             <div key={i}>{w}</div>
           ))}
@@ -740,7 +740,7 @@ export default function App() {
       ) : (
         /* Фокус-режим: гант на всё окно, сверху — узкая панель с нужными
            при работе с гантом контролами. Модалки задач открываются поверх. */
-        <div className="fixed inset-0 z-40 flex flex-col gap-2 bg-slate-50 p-3">
+        <div className="fixed inset-0 z-40 flex flex-col gap-2 bg-[#f4f7fb] p-3">
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-sm font-semibold text-slate-700">
               Планировщик ресурсов
@@ -760,7 +760,7 @@ export default function App() {
                         Math.min(52, Math.max(1, Number(e.target.value) || 1)),
                       )
                     }
-                    className="w-16 rounded border border-slate-300 px-2 py-1 text-center tabular-nums"
+                    className="w-16 rounded-lg border border-slate-300 px-2 py-1 text-center tabular-nums outline-none focus:border-primary"
                   />
                   нед.
                 </label>
@@ -768,7 +768,7 @@ export default function App() {
                   onClick={undo}
                   disabled={undoStack.length === 0}
                   title="Отменить (Ctrl+Z)"
-                  className="rounded-md border border-slate-300 px-3 py-1 text-sm hover:bg-slate-100 disabled:opacity-40"
+                  className="rounded-full border border-slate-300 px-3.5 py-1 text-sm hover:bg-slate-100 disabled:opacity-40"
                 >
                   ↶
                 </button>
@@ -776,7 +776,7 @@ export default function App() {
                   onClick={redo}
                   disabled={redoStack.length === 0}
                   title="Повторить (Ctrl+Shift+Z)"
-                  className="rounded-md border border-slate-300 px-3 py-1 text-sm hover:bg-slate-100 disabled:opacity-40"
+                  className="rounded-full border border-slate-300 px-3.5 py-1 text-sm hover:bg-slate-100 disabled:opacity-40"
                 >
                   ↷
                 </button>
@@ -784,7 +784,7 @@ export default function App() {
                   <button
                     onClick={resetPins}
                     title="Снять все ручные закрепления и вернуть автопланирование"
-                    className="text-sm font-medium text-sky-600 hover:underline"
+                    className="text-sm font-medium text-primary hover:underline"
                   >
                     Сбросить закрепления ({pinnedCount})
                   </button>
@@ -796,13 +796,13 @@ export default function App() {
                 type="checkbox"
                 checked={showReleases}
                 onChange={toggleReleases}
-                className="accent-emerald-600"
+                className="accent-primary"
               />
               🚀 Релизы
             </label>
             <button
               onClick={() => setGanttFull(false)}
-              className="ml-auto rounded-md border border-slate-300 px-3 py-1 text-sm hover:bg-slate-100"
+              className="ml-auto rounded-full border border-slate-300 px-3.5 py-1 text-sm hover:bg-slate-100"
             >
               ✕ Свернуть (Esc)
             </button>
@@ -813,11 +813,11 @@ export default function App() {
 
       {/* Легенда */}
       <div className="flex flex-wrap items-center gap-4 text-xs text-slate-500">
-        <Legend color="bg-indigo-500" label="Архитектура" />
-        <Legend color="bg-sky-500" label="Разработка" />
-        <Legend color="bg-amber-400" label="Ревью кода" />
-        <Legend color="bg-emerald-500" label="QA" />
-        <Legend color="bg-red-500/15 ring-2 ring-inset ring-red-500" label="Перегрузка (наложение)" />
+        <Legend color="bg-primary" label="Архитектура" />
+        <Legend color="bg-secondary" label="Разработка" />
+        <Legend color="bg-warning" label="Ревью кода" />
+        <Legend color="bg-success" label="QA" />
+        <Legend color="bg-error/15 ring-2 ring-inset ring-error" label="Перегрузка (наложение)" />
         <Legend
           color="bg-slate-200 ring-1 ring-inset ring-slate-300"
           label="Завершена"
@@ -834,7 +834,7 @@ export default function App() {
             type="checkbox"
             checked={showReleases}
             onChange={toggleReleases}
-            className="accent-emerald-600"
+            className="accent-primary"
           />
           🚀 Релизы на ганте
         </label>
@@ -842,7 +842,7 @@ export default function App() {
           <button
             onClick={resetPins}
             title="Снять все ручные закрепления и вернуть автопланирование"
-            className="font-medium text-sky-600 hover:underline"
+            className="font-medium text-primary hover:underline"
           >
             Сбросить закрепления ({pinnedCount})
           </button>
@@ -856,28 +856,28 @@ export default function App() {
       </div>
 
       {/* Релизы */}
-      <section className="rounded-lg border border-slate-200 bg-white">
-        <div className="flex items-center justify-between border-b border-slate-200 px-4 py-2">
-          <h2 className="text-sm font-semibold text-slate-700">
+      <section className="overflow-hidden rounded-xl bg-white shadow-card">
+        <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3">
+          <h2 className="text-base font-semibold text-slate-800">
             Задачи и даты релизов
           </h2>
           <button
             onClick={() => downloadReleasesCsv(activeReleases, data.tasks)}
             disabled={activeReleases.length === 0}
             title="Скачать таблицу как CSV (для Excel); завершённые не выгружаются"
-            className="rounded-md border border-slate-300 px-3 py-1 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-40"
+            className="rounded-full border border-slate-300 px-3.5 py-1 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-40"
           >
             Экспорт в CSV
           </button>
         </div>
         <table className="w-full text-sm">
           <thead>
-            <tr className="text-left text-xs text-slate-400">
-              <th className="px-4 py-2 font-medium">Приоритет</th>
-              <th className="px-4 py-2 font-medium">Задача</th>
-              <th className="px-4 py-2 font-medium">QA готово</th>
-              <th className="px-4 py-2 font-medium">Релиз (вт/чт)</th>
-              <th className="px-4 py-2"></th>
+            <tr className="text-left text-xs font-semibold uppercase tracking-wide text-slate-400">
+              <th className="px-5 py-2.5 font-semibold">Приоритет</th>
+              <th className="px-5 py-2.5 font-semibold">Задача</th>
+              <th className="px-5 py-2.5 font-semibold">QA готово</th>
+              <th className="px-5 py-2.5 font-semibold">Релиз (вт/чт)</th>
+              <th className="px-5 py-2.5"></th>
             </tr>
           </thead>
           <tbody>
@@ -892,7 +892,7 @@ export default function App() {
                   key={rel.taskId}
                   className="border-t border-slate-100 hover:bg-slate-50"
                 >
-                  <td className="px-4 py-2">
+                  <td className="px-5 py-2">
                     <input
                       type="number"
                       min={1}
@@ -901,26 +901,26 @@ export default function App() {
                       onChange={(e) =>
                         setPriority(task.id, Number(e.target.value) || 1)
                       }
-                      className={`w-14 rounded border px-2 py-0.5 text-center tabular-nums disabled:opacity-60 ${PRIORITY_STYLE(
+                      className={`w-14 rounded-lg border px-2 py-0.5 text-center tabular-nums disabled:opacity-60 ${PRIORITY_STYLE(
                         task.priority,
                       )}`}
                     />
                   </td>
-                  <td className="px-4 py-2 text-slate-700">{rel.taskName}</td>
-                  <td className="px-4 py-2 tabular-nums text-slate-500">
+                  <td className="px-5 py-2 font-medium text-slate-700">{rel.taskName}</td>
+                  <td className="px-5 py-2 tabular-nums text-slate-500">
                     {formatFull(rel.qaEndDate)}
                   </td>
-                  <td className="px-4 py-2">
+                  <td className="px-5 py-2">
                     <span className="font-medium tabular-nums text-slate-800">
                       {formatRelease(rel.releaseDate)}
                     </span>
                     {beyond && (
-                      <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-700">
+                      <span className="ml-2 rounded-full bg-warning-light px-2 py-0.5 text-[10px] font-medium text-amber-700">
                         за горизонтом
                       </span>
                     )}
                   </td>
-                  <td className="px-4 py-2 text-right">
+                  <td className="px-5 py-2 text-right">
                     {!readOnly && (
                       <span className="flex items-center justify-end gap-3">
                         <button
@@ -932,7 +932,7 @@ export default function App() {
                         </button>
                         <button
                           onClick={() => setEditingTask(task)}
-                          className="text-xs text-slate-400 hover:text-sky-600"
+                          className="text-xs text-slate-400 hover:text-primary"
                         >
                           редактировать
                         </button>
@@ -951,8 +951,8 @@ export default function App() {
 
             {/* Завершённые: свёрнутая секция-архив в конце таблицы. */}
             {doneReleases.length > 0 && (
-              <tr className="border-t border-slate-200 bg-slate-50">
-                <td colSpan={5} className="px-4 py-1.5">
+              <tr className="border-t border-slate-100 bg-slate-50">
+                <td colSpan={5} className="px-5 py-1.5">
                   <button
                     onClick={() => setShowDone((v) => !v)}
                     className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-700"
@@ -973,8 +973,8 @@ export default function App() {
                     key={rel.taskId}
                     className="border-t border-slate-100 text-slate-400"
                   >
-                    <td className="px-4 py-2 text-center">✓</td>
-                    <td className="px-4 py-2">
+                    <td className="px-5 py-2 text-center">✓</td>
+                    <td className="px-5 py-2">
                       <span className="line-through">{rel.taskName}</span>
                       {task.completedAt && (
                         <span className="ml-2 text-[10px]">
@@ -982,19 +982,19 @@ export default function App() {
                         </span>
                       )}
                     </td>
-                    <td className="px-4 py-2 tabular-nums">
+                    <td className="px-5 py-2 tabular-nums">
                       {formatFull(rel.qaEndDate)}
                     </td>
-                    <td className="px-4 py-2 tabular-nums">
+                    <td className="px-5 py-2 tabular-nums">
                       {formatRelease(rel.releaseDate)}
                     </td>
-                    <td className="px-4 py-2 text-right">
+                    <td className="px-5 py-2 text-right">
                       {!readOnly && (
                         <span className="flex items-center justify-end gap-3">
                           <button
                             onClick={() => markActive(rel.taskId)}
                             title="Снять отметку о завершении: задача снова участвует в планировании"
-                            className="text-xs text-slate-400 hover:text-sky-600"
+                            className="text-xs text-slate-400 hover:text-primary"
                           >
                             ↩ вернуть в работу
                           </button>

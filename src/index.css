@@ -1,4 +1,28 @@
+@import '@fontsource-variable/manrope';
 @import 'tailwindcss';
+
+/* Дизайн-токены в стиле MatDash: шрифт Manrope, синий primary,
+   у каждого статусного цвета — бледная light-пара для фонов бейджей.
+   Токены доступны как классы: bg-primary, text-error, bg-warning-light… */
+@theme {
+  --font-sans: 'Manrope Variable', ui-sans-serif, system-ui, 'Segoe UI', Roboto,
+    Arial, sans-serif;
+
+  --color-primary: #3772ff;
+  --color-primary-light: #ecf2ff;
+  --color-secondary: #49beff;
+  --color-secondary-light: #e8f7ff;
+  --color-success: #13deb9;
+  --color-success-light: #e6fffa;
+  --color-warning: #ffae1f;
+  --color-warning-light: #fef5e5;
+  --color-error: #fa896b;
+  --color-error-light: #fdede8;
+
+  /* Мягкая тень карточек вместо рамок. */
+  --shadow-card: 0 2px 4px -1px rgb(15 23 42 / 0.06),
+    0 9px 20px -4px rgb(100 116 139 / 0.16);
+}
 
 html,
 body,
@@ -8,7 +32,7 @@ body,
 }
 
 body {
-  font-family: ui-sans-serif, system-ui, 'Segoe UI', Roboto, Arial, sans-serif;
-  background: #f8fafc;
+  /* Светлый серо-голубой фон страницы — белые карточки читаются на нём. */
+  background: #f4f7fb;
   color: #0f172a;
 }

@@ -68,7 +68,7 @@ function StatusBadge({ e }: { e: EmployeePeriodReport }) {
   if (e.status === 'overloaded') {
     return (
       <span
-        className="rounded bg-red-100 px-1.5 py-0.5 text-[11px] font-medium text-red-700"
+        className="rounded-full bg-error-light px-2 py-0.5 text-[11px] font-medium text-rose-700"
         title={`Дней с наложением этапов: ${e.overloadDays}`}
       >
         🔴 перегружен · {e.overloadDays} дн.
@@ -78,7 +78,7 @@ function StatusBadge({ e }: { e: EmployeePeriodReport }) {
   if (e.status === 'underloaded') {
     return (
       <span
-        className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-500"
+        className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-500"
         title={`Занято меньше половины доступных дней, свободно ${e.freeDays} дн.`}
       >
         ⚪ недогружен · свободно {e.freeDays} дн.
@@ -135,21 +135,21 @@ export function ReportModal({ data, result, onClose }: Props) {
           <h2 className="text-lg font-semibold text-slate-800">Отчёт за период</h2>
           <button
             onClick={onClose}
-            className="rounded-md px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100"
+            className="rounded-full px-3.5 py-1.5 text-sm text-slate-600 hover:bg-slate-100"
           >
             Закрыть
           </button>
         </div>
 
         {/* Выбор периода: пресеты от сегодня + произвольные даты. */}
-        <div className="mb-4 flex flex-wrap items-end gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
+        <div className="mb-4 flex flex-wrap items-end gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
           {(Object.keys(PRESET_LABELS) as Preset[]).map((p) => (
             <button
               key={p}
               onClick={() => applyPreset(p)}
-              className={`rounded-md border px-3 py-1.5 text-sm ${
+              className={`rounded-full border px-3.5 py-1.5 text-sm ${
                 preset === p
-                  ? 'border-sky-500 bg-sky-50 font-medium text-sky-700'
+                  ? 'border-primary bg-primary-light font-medium text-primary'
                   : 'border-slate-300 hover:bg-slate-100'
               }`}
             >
@@ -189,7 +189,7 @@ export function ReportModal({ data, result, onClose }: Props) {
             <button
               onClick={copyMarkdown}
               disabled={report.totalDays === 0}
-              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100 disabled:opacity-40"
+              className="rounded-full border border-slate-300 px-3.5 py-1.5 text-sm hover:bg-slate-100 disabled:opacity-40"
               title="Скопировать отчёт как markdown — вставить в письмо или чат"
             >
               {copied ? '✓ Скопировано' : 'Копировать .md'}
@@ -197,7 +197,7 @@ export function ReportModal({ data, result, onClose }: Props) {
             <button
               onClick={() => downloadReportMarkdown(report)}
               disabled={report.totalDays === 0}
-              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100 disabled:opacity-40"
+              className="rounded-full border border-slate-300 px-3.5 py-1.5 text-sm hover:bg-slate-100 disabled:opacity-40"
             >
               Скачать .md
             </button>
@@ -206,7 +206,7 @@ export function ReportModal({ data, result, onClose }: Props) {
                 downloadWeeklyLoadCsv(buildWeeklyLoadReport(data, result, from, to))
               }
               disabled={report.totalDays === 0}
-              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100 disabled:opacity-40"
+              className="rounded-full border border-slate-300 px-3.5 py-1.5 text-sm hover:bg-slate-100 disabled:opacity-40"
               title="CSV по неделям: эпик × сотрудник × % загрузки — открыть в Excel"
             >
               Скачать .csv
@@ -215,7 +215,7 @@ export function ReportModal({ data, result, onClose }: Props) {
         </div>
 
         {from > to && (
-          <p className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+          <p className="mb-4 rounded-lg border border-warning/40 bg-warning-light px-3 py-2 text-xs text-amber-700">
             Дата «С» позже даты «По» — поправьте период.
           </p>
         )}

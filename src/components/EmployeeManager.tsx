@@ -48,14 +48,14 @@ export function EmployeeManager({
           </h2>
           <button
             onClick={onClose}
-            className="rounded-md px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100"
+            className="rounded-full px-3.5 py-1.5 text-sm text-slate-600 hover:bg-slate-100"
           >
             Закрыть
           </button>
         </div>
 
         {/* Добавление нового сотрудника */}
-        <div className="mb-4 flex items-end gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
+        <div className="mb-4 flex items-end gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
           <label className="flex-1 text-sm">
             <span className="mb-1 block text-slate-500">Новый сотрудник</span>
             <input
@@ -63,7 +63,7 @@ export function EmployeeManager({
               onChange={(e) => setNewName(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && addNew()}
               placeholder="Имя Фамилия"
-              className="w-full rounded-md border border-slate-300 px-2 py-1.5 outline-none focus:border-sky-500"
+              className="w-full rounded-md border border-slate-300 px-2 py-1.5 outline-none focus:border-primary"
             />
           </label>
           <select
@@ -80,7 +80,7 @@ export function EmployeeManager({
           <button
             onClick={addNew}
             disabled={!newName.trim()}
-            className="rounded-md bg-sky-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-sky-700 disabled:opacity-40"
+            className="rounded-full bg-primary px-4 py-1.5 text-sm font-medium text-white hover:bg-primary/90 disabled:opacity-40"
           >
             Добавить
           </button>
@@ -161,7 +161,7 @@ function EmployeeRow({
         <input
           value={emp.name}
           onChange={(e) => onUpdate(emp.id, { name: e.target.value })}
-          className="flex-1 rounded-md border border-slate-300 px-2 py-1 text-sm outline-none focus:border-sky-500"
+          className="flex-1 rounded-md border border-slate-300 px-2 py-1 text-sm outline-none focus:border-primary"
         />
         <select
           value={emp.specialization}
@@ -182,7 +182,7 @@ function EmployeeRow({
           onClick={() => {
             if (confirm(`Удалить «${emp.name}» из команды?`)) onDelete(emp.id);
           }}
-          className="rounded-md px-2 py-1 text-xs text-slate-400 hover:bg-rose-50 hover:text-rose-600"
+          className="rounded-full px-2.5 py-1 text-xs text-slate-400 hover:bg-error-light hover:text-rose-600"
         >
           удалить
         </button>
@@ -217,7 +217,7 @@ function EmployeeRow({
         {emp.unavailable.map((r, idx) => (
           <span
             key={idx}
-            className="flex items-center gap-1 rounded bg-amber-100 px-1.5 py-0.5 text-[11px] text-amber-800"
+            className="flex items-center gap-1 rounded-full bg-warning-light px-2 py-0.5 text-[11px] text-amber-800"
           >
             {shortLabel(r.from)} – {shortLabel(r.to)}
             <button
@@ -246,7 +246,7 @@ function EmployeeRow({
           <button
             onClick={addRange}
             disabled={!from || !to}
-            className="rounded bg-slate-200 px-2 py-0.5 text-xs hover:bg-slate-300 disabled:opacity-40"
+            className="rounded-full bg-slate-200 px-2.5 py-0.5 text-xs hover:bg-slate-300 disabled:opacity-40"
           >
             + отпуск
           </button>

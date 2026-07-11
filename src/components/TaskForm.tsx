@@ -116,7 +116,7 @@ export function TaskForm({ employees, defaultPriority, initialTask, onAdd, onClo
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="Напр. Платёжный шлюз v2"
-              className="w-full rounded-md border border-slate-300 px-2 py-1.5 outline-none focus:border-sky-500"
+              className="w-full rounded-md border border-slate-300 px-2 py-1.5 outline-none focus:border-primary"
             />
           </label>
           <label className="w-28 text-sm">
@@ -126,7 +126,7 @@ export function TaskForm({ employees, defaultPriority, initialTask, onAdd, onClo
               min={1}
               value={priority}
               onChange={(e) => setPriority(Number(e.target.value) || 1)}
-              className="w-full rounded-md border border-slate-300 px-2 py-1.5 outline-none focus:border-sky-500"
+              className="w-full rounded-md border border-slate-300 px-2 py-1.5 outline-none focus:border-primary"
             />
           </label>
         </div>
@@ -140,7 +140,7 @@ export function TaskForm({ employees, defaultPriority, initialTask, onAdd, onClo
             return (
               <div
                 key={type}
-                className="flex items-center gap-2 rounded-md border border-slate-200 px-2 py-1.5 text-sm"
+                className="flex items-center gap-2 rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
               >
                 <label className="flex w-32 shrink-0 items-center gap-2">
                   <input
@@ -188,14 +188,14 @@ export function TaskForm({ employees, defaultPriority, initialTask, onAdd, onClo
         <div className="mt-5 flex justify-end gap-2">
           <button
             onClick={onClose}
-            className="rounded-md px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100"
+            className="rounded-full px-3.5 py-1.5 text-sm text-slate-600 hover:bg-slate-100"
           >
             Отмена
           </button>
           <button
             onClick={submit}
             disabled={!canSubmit}
-            className="rounded-md bg-sky-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-sky-700 disabled:opacity-40"
+            className="rounded-full bg-primary px-4 py-1.5 text-sm font-medium text-white hover:bg-primary/90 disabled:opacity-40"
           >
             {isEdit ? 'Сохранить' : 'Добавить'}
           </button>
