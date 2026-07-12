@@ -42,12 +42,12 @@
 - `src/engine/complete.ts` — завершение задачи (заморозка этапов) и возврат в работу
 - `src/engine/dates.ts` — рабочие дни, parseISO/formatISO, nextReleaseDay (вт/чт)
 - `src/data/sampleData.ts` — демо-данные (кнопка «Демо»)
-- `api/save.ts`, `api/load.ts` — serverless-функции Vercel для шаринга, Upstash Redis (env: `KV_REST_API_URL/TOKEN` или `UPSTASH_REDIS_REST_*`), ключи `plan:{id}`
+- `api/save.ts`, `api/load.ts`, `api/delete.ts` — serverless-функции Vercel для шаринга, Upstash Redis (env: `KV_REST_API_URL/TOKEN` или `UPSTASH_REDIS_REST_*`), ключи `plan:{id}`. Общий код — `api/_lib.ts` (redis, rate limiting, sha256, TTL год с продлением на чтении/записи); валидация и лимиты — `src/share/planGuards.ts` (лежит в src, чтобы покрываться tsc и тестами)
 
 ## Хранение
 
 - Автосейв всего `AppData` в localStorage (`resource-planner:data`) при каждом изменении; сохранение/загрузка в файл — File System Access API (Chrome/Edge) с фолбэком на скачивание/`<input type=file>`. Формат файла: `{ version: SCHEMA_VERSION, data }`.
-- Шаринг: «Поделиться» публикует план через `/api/save`, id запоминается в localStorage (`resource-planner:shareId`) — повторная публикация перезаписывает тот же план, ссылка постоянная. Открытие `?plan=id` → режим только-чтение.
+- Шаринг: «Поделиться» публикует план через `/api/save`; в localStorage запоминаются id (`resource-planner:shareId`) и секрет владельца (`resource-planner:shareEditKey`) — повторная публикация перезаписывает тот же план, ссылка постоянная. Ссылка `?plan=id` даёт только чтение; перезапись и отзыв требуют editKey (в записи хранится его sha256-хэш). «Отозвать ссылку» в меню «Файл» удаляет план с сервера (`/api/delete`). Перед первой публикацией — предупреждение, что имена сотрудников и отпуска уходят на сервер.
 - Настройки вида — личные предпочтения зрителя, хранить в localStorage отдельными ключами, **не в AppData** (она уходит в файл и в общую ссылку). Пример: `resource-planner:show-releases` — чекбокс «🚀 Релизы на ганте» в легенде.
 
 ## Договорённости

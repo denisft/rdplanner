@@ -22,6 +22,10 @@ import {
   fetchSharedPlan,
   shareUrl,
   planIdFromUrl,
+  getShareId,
+  clearShare,
+  revokePlan,
+  WrongEditKeyError,
 } from './storage/shareStorage';
 import { downloadMarkdown } from './export/markdownExport';
 import { downloadReleasesCsv } from './export/csvExport';
@@ -408,6 +412,15 @@ export default function App() {
   // Пока публикация идёт, кнопка заблокирована — двойной клик не даст два POST.
   const onShare = async () => {
     if (sharingRef.current) return;
+    // Перед первой публикацией предупреждаем: план с именами людей и их
+    // отсутствиями уедет на сервер и будет виден всем, у кого есть ссылка.
+    if (
+      !getShareId() &&
+      !window.confirm(
+        'План будет сохранён на сервере и станет доступен всем, у кого есть ссылка, — включая имена сотрудников и их отпуска.\n\nСсылку можно отозвать в любой момент: Файл → «Отозвать ссылку». Продолжить?',
+      )
+    )
+      return;
     sharingRef.current = true;
     setSharing(true);
     setStatus(null);
@@ -421,15 +434,56 @@ export default function App() {
       } catch {
         setStatus({ text: 'Ссылка готова — скопируйте её ниже', kind: 'ok' });
       }
-    } catch {
+    } catch (err) {
       setShareLink('');
-      setStatus({
-        text: 'Не удалось опубликовать. Подключено ли хранилище в Vercel?',
-        kind: 'error',
-      });
+      if (err instanceof WrongEditKeyError) {
+        // Наш секрет не подошёл к сохранённой ссылке — забываем её;
+        // следующее «Поделиться» создаст новую.
+        clearShare();
+        setStatus({
+          text: 'Старую ссылку обновить не удалось — нажмите «Поделиться» ещё раз, будет создана новая.',
+          kind: 'error',
+        });
+      } else {
+        setStatus({
+          text: 'Не удалось опубликовать. Подключено ли хранилище в Vercel?',
+          kind: 'error',
+        });
+      }
     } finally {
       sharingRef.current = false;
       setSharing(false);
+    }
+  };
+
+  // Отозвать ссылку: план удаляется с сервера, у коллег она перестаёт открываться.
+  const onRevoke = async () => {
+    if (
+      !window.confirm(
+        'Отозвать ссылку? План будет удалён с сервера, ссылка у коллег перестанет открываться.',
+      )
+    )
+      return;
+    setStatus(null);
+    try {
+      await revokePlan();
+      setShareLink('');
+      setStatus({ text: 'Ссылка отозвана — план удалён с сервера', kind: 'ok' });
+    } catch (err) {
+      if (err instanceof WrongEditKeyError) {
+        // Удалить с сервера не можем (секрет не наш) — хотя бы забываем локально.
+        clearShare();
+        setShareLink('');
+        setStatus({
+          text: 'Ссылка забыта, но удалить план с сервера не удалось — секрет не подошёл.',
+          kind: 'error',
+        });
+      } else {
+        setStatus({
+          text: 'Не удалось отозвать ссылку — попробуйте ещё раз',
+          kind: 'error',
+        });
+      }
     }
   };
 
@@ -643,6 +697,26 @@ export default function App() {
                     Экспорт .md
                   </button>
 
+                  {getShareId() && (
+                    <>
+                      <div
+                        className="my-1 border-t border-slate-200"
+                        aria-hidden
+                      />
+                      <button
+                        role="menuitem"
+                        onClick={() => {
+                          setShowFileMenu(false);
+                          onRevoke();
+                        }}
+                        className="block w-full px-3 py-1.5 text-left text-rose-600 hover:bg-slate-100"
+                        title="Удалить опубликованный план с сервера — ссылка у коллег перестанет открываться"
+                      >
+                        Отозвать ссылку…
+                      </button>
+                    </>
+                  )}
+
                   <div className="my-1 border-t border-slate-200" aria-hidden />
 
                   <button
@@ -689,7 +763,8 @@ export default function App() {
             className="flex-1 rounded-lg border border-teal-200 bg-white px-2 py-1 text-slate-700"
           />
           <span className="text-teal-600">
-            обновляйте кнопкой «Поделиться» — ссылка не меняется
+            обновляйте кнопкой «Поделиться» — ссылка не меняется; отозвать —
+            Файл → «Отозвать ссылку»
           </span>
         </div>
       )}
