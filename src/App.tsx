@@ -205,6 +205,8 @@ export default function App() {
   const taskCountLabel =
     `${viewData.employees.length} чел · ${activeTaskCount} задач` +
     (doneTaskCount > 0 ? ` · ${doneTaskCount} завершено` : '');
+  // Короткая версия для шапки — полная уходит в тултип, чтобы не распирать строку.
+  const taskCountShort = `${viewData.employees.length} чел · ${activeTaskCount} задач`;
 
   const releasesSorted = useMemo(
     () => [...result.releases].sort((a, b) => a.qaEndIndex - b.qaEndIndex),
@@ -682,18 +684,27 @@ export default function App() {
 
   return (
     <div className="mx-auto flex min-h-full max-w-[1400px] flex-col gap-4 p-5">
-      <header className="flex flex-wrap items-center gap-3 rounded-xl bg-white px-5 py-3 shadow-card">
-        <h1 className="text-xl font-bold text-slate-800">Планировщик ресурсов</h1>
+      {/* Шапка строго в одну строку: перенос запрещён, при нехватке места
+          вкладки команд ужимаются и скроллятся, заголовок и счётчик прячутся. */}
+      <header className="flex items-center gap-x-3 rounded-xl bg-white px-5 py-2 shadow-card">
+        <h1 className="hidden whitespace-nowrap text-xl font-bold text-slate-800 lg:block">
+          Планировщик ресурсов
+        </h1>
         <TeamTabs
           teams={data.teams}
           activeId={effectiveTeamId}
           onSelect={setActiveTeam}
           onAdd={readOnly ? undefined : addTeam}
         />
-        <span className="text-sm text-slate-400">{taskCountLabel}</span>
+        <span
+          className="hidden whitespace-nowrap text-sm text-slate-400 md:inline"
+          title={taskCountLabel}
+        >
+          {taskCountShort}
+        </span>
 
         {readOnly ? (
-          <div className="ml-auto flex items-center gap-3">
+          <div className="ml-auto flex shrink-0 items-center gap-3">
             <span className="rounded-full bg-slate-100 px-3 py-1 text-sm text-slate-600">
               👁 Просмотр — только чтение
             </span>
@@ -729,30 +740,28 @@ export default function App() {
           /* Тулбар в три группы: вид, работа с планом, публикация. Всё,
              что нажимается нечасто (сотрудники, отчёт, файловые операции,
              демо), убрано в меню «Файл» — в ряду только ежедневное. */
-          <div className="ml-auto flex flex-wrap items-center gap-2">
-            <label className="flex items-center gap-1 text-sm text-slate-500">
-              Горизонт:
-              <input
-                type="number"
-                min={1}
-                max={52}
-                value={data.horizonWeeks}
-                onChange={(e) =>
-                  setHorizonWeeks(
-                    Math.min(52, Math.max(1, Number(e.target.value) || 1)),
-                  )
-                }
-                className="w-16 rounded-lg border border-slate-300 px-2 py-1 text-center tabular-nums outline-none focus:border-primary"
-              />
-              нед.
-            </label>
+          <div className="ml-auto flex shrink-0 items-center gap-2">
+            <input
+              type="number"
+              min={1}
+              max={52}
+              value={data.horizonWeeks}
+              title="Горизонт плана, недель"
+              aria-label="Горизонт плана, недель"
+              onChange={(e) =>
+                setHorizonWeeks(
+                  Math.min(52, Math.max(1, Number(e.target.value) || 1)),
+                )
+              }
+              className="w-16 rounded-lg border border-slate-300 px-2 py-1 text-center text-sm tabular-nums outline-none focus:border-primary"
+            />
             <button
               onClick={shiftHorizon}
               disabled={!canShiftHorizon}
-              title="Сдвинуть начало горизонта к текущей неделе (минус неделя контекста): прошлое фиксируется, даты релизов не меняются"
+              title="К текущей неделе: сдвинуть начало горизонта (минус неделя контекста), прошлое фиксируется, даты релизов не меняются"
               className="rounded-full border border-slate-300 px-3.5 py-1.5 text-sm hover:bg-slate-100 disabled:opacity-40"
             >
-              ⇤ К текущей неделе
+              ⇤
             </button>
             <button
               onClick={() => setGanttFull(true)}
@@ -1393,12 +1402,13 @@ function TeamTabs({
 }) {
   if (teams.length <= 1 && !onAdd) return null;
   return (
-    <div className="flex items-center gap-1 rounded-full bg-slate-100 p-1">
+    // Скроллбар спрятан, чтобы не распирал шапку по высоте; прокрутка — колесом.
+    <div className="flex min-w-0 items-center gap-1 overflow-x-auto rounded-full bg-slate-100 p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
       {teams.map((t) => (
         <button
           key={t.id}
           onClick={() => onSelect(t.id)}
-          className={`rounded-full px-3 py-1 text-sm ${
+          className={`shrink-0 whitespace-nowrap rounded-full px-3 py-1 text-sm ${
             t.id === activeId
               ? 'bg-white font-medium text-slate-800 shadow-sm'
               : 'text-slate-500 hover:text-slate-700'
@@ -1411,7 +1421,7 @@ function TeamTabs({
         <button
           onClick={onAdd}
           title="Добавить команду"
-          className="rounded-full px-2 py-1 text-sm text-slate-400 hover:text-primary"
+          className="shrink-0 rounded-full px-2 py-1 text-sm text-slate-400 hover:text-primary"
         >
           +
         </button>
