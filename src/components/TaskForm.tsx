@@ -1,7 +1,15 @@
 import { useState } from 'react';
-import type { Employee, Stage, StageType, Task } from '../types';
+import type { Employee, StageType, Task } from '../types';
 import { STAGE_LABELS, STAGE_ORDER } from '../types';
 import { assigneePool } from '../roles';
+import {
+  buildStages,
+  defaultDrafts,
+  draftsFromTask,
+  reviewLockedTo as lockedReviewer,
+  uid,
+  type StageDraft,
+} from './stageDraft';
 
 interface Props {
   employees: Employee[];
@@ -11,86 +19,32 @@ interface Props {
   onClose: () => void;
 }
 
-interface StageDraft {
-  enabled: boolean;
-  durationDays: number;
-  assigneeId: string | null;
-}
-
-const uid = () =>
-  typeof crypto !== 'undefined' && crypto.randomUUID
-    ? crypto.randomUUID()
-    : Math.random().toString(36).slice(2);
-
-function draftsFromTask(task: Task): Record<StageType, StageDraft> {
-  const defaults: Record<StageType, StageDraft> = {
-    architecture: { enabled: false, durationDays: 2, assigneeId: null },
-    development: { enabled: false, durationDays: 5, assigneeId: null },
-    review: { enabled: false, durationDays: 1, assigneeId: null },
-    qa: { enabled: false, durationDays: 2, assigneeId: null },
-  };
-  for (const stage of task.stages) {
-    defaults[stage.type] = {
-      enabled: true,
-      durationDays: stage.durationDays,
-      assigneeId: stage.assigneeId,
-    };
-  }
-  return defaults;
-}
-
 export function TaskForm({ employees, defaultPriority, initialTask, onAdd, onClose }: Props) {
   const isEdit = initialTask !== undefined;
 
   const [name, setName] = useState(initialTask?.name ?? '');
   const [priority, setPriority] = useState(initialTask?.priority ?? defaultPriority);
   const [stages, setStages] = useState<Record<StageType, StageDraft>>(
-    isEdit
-      ? draftsFromTask(initialTask!)
-      : {
-          architecture: { enabled: true, durationDays: 2, assigneeId: null },
-          development: { enabled: true, durationDays: 5, assigneeId: null },
-          review: { enabled: true, durationDays: 1, assigneeId: null },
-          qa: { enabled: true, durationDays: 2, assigneeId: null },
-        },
+    isEdit ? draftsFromTask(initialTask!) : defaultDrafts(true),
   );
 
   const update = (type: StageType, patch: Partial<StageDraft>) =>
     setStages((prev) => ({ ...prev, [type]: { ...prev[type], ...patch } }));
 
-  const reviewLockedTo = stages.architecture.enabled
-    ? stages.architecture.assigneeId
-    : null;
+  const reviewLockedTo = lockedReviewer(stages);
 
   const canSubmit =
     name.trim().length > 0 &&
     STAGE_ORDER.some((t) => stages[t].enabled && stages[t].durationDays > 0);
 
   const submit = () => {
-    const built: Stage[] = [];
-    for (const type of STAGE_ORDER) {
-      const d = stages[type];
-      if (!d.enabled || d.durationDays <= 0) continue;
-      const assigneeId =
-        type === 'review' && reviewLockedTo !== null ? reviewLockedTo : d.assigneeId;
-
-      // При редактировании сохраняем id этапа и pinnedStartDate, если этап уже существовал.
-      const existingStage = initialTask?.stages.find((s) => s.type === type);
-      built.push({
-        id: existingStage?.id ?? uid(),
-        type,
-        durationDays: d.durationDays,
-        assigneeId,
-        pinnedStartDate: existingStage?.pinnedStartDate ?? null,
-      });
-    }
     // Спред первым: у завершённой задачи сохраняются done/completedAt.
     onAdd({
       ...initialTask,
       id: initialTask?.id ?? uid(),
       name: name.trim(),
       priority,
-      stages: built,
+      stages: buildStages(stages, initialTask),
     });
     onClose();
   };

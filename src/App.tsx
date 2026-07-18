@@ -5,6 +5,7 @@ import { completeTask, reopenTask } from './engine/complete';
 import { formatISO, parseISO, SHORT_MONTHS, SHORT_WEEKDAYS } from './engine/dates';
 import { GanttChart } from './components/GanttChart';
 import { TaskForm } from './components/TaskForm';
+import { UrgentTaskModal } from './components/UrgentTaskModal';
 import { EmployeeManager } from './components/EmployeeManager';
 import { ReportModal } from './components/ReportModal';
 import { PRIORITY_STYLE, UNAVAILABLE_STRIPES } from './components/stageStyle';
@@ -76,6 +77,8 @@ export default function App() {
   const [redoStack, setRedoStack] = useState<AppData[]>([]);
   const [handle, setHandle] = useState<FsFileHandle | null>(null);
   const [showForm, setShowForm] = useState(false);
+  // Модалка «Срочная задача» (БЛ-17): предпросмотр удара до внесения в план.
+  const [showUrgent, setShowUrgent] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [showTeam, setShowTeam] = useState(false);
   // Модалка «Отчёт за период» — доступна и в режиме просмотра по ссылке.
@@ -286,12 +289,12 @@ export default function App() {
     if (!ganttFull) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
-      if (showForm || editingTask || showTeam || showReport) return;
+      if (showForm || editingTask || showTeam || showReport || showUrgent) return;
       setGanttFull(false);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [ganttFull, showForm, editingTask, showTeam, showReport]);
+  }, [ganttFull, showForm, editingTask, showTeam, showReport, showUrgent]);
 
   // Перетащили этап на сотрудника и день — закрепляем вручную.
   const moveStage = (stageId: string, employeeId: string, isoDate: string) => {
@@ -603,6 +606,13 @@ export default function App() {
               className="rounded-full bg-primary px-4 py-1.5 text-sm font-medium text-white hover:bg-primary/90"
             >
               + Задача
+            </button>
+            <button
+              onClick={() => setShowUrgent(true)}
+              title="Срочная задача: предпросмотр, кого задело, до внесения в план"
+              className="rounded-full border border-error/40 bg-error-light px-4 py-1.5 text-sm font-medium text-error hover:bg-error-light/70"
+            >
+              ⚡ Срочная
             </button>
             <button
               onClick={undo}
@@ -1095,6 +1105,18 @@ export default function App() {
           defaultPriority={nextPriority}
           onAdd={addTask}
           onClose={() => setShowForm(false)}
+        />
+      )}
+
+      {showUrgent && (
+        <UrgentTaskModal
+          data={data}
+          onApply={(urgent) => {
+            pushUndo();
+            addTask(urgent);
+            setShowUrgent(false);
+          }}
+          onClose={() => setShowUrgent(false)}
         />
       )}
 
