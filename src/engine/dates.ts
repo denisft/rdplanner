@@ -18,10 +18,23 @@ export function isWeekend(date: Date): boolean {
   return day === 0 || day === 6; // вс или сб
 }
 
-function addDays(date: Date, n: number): Date {
+export function addDays(date: Date, n: number): Date {
   const r = new Date(date);
   r.setDate(r.getDate() + n);
   return r;
+}
+
+/** Число рабочих дней в полуинтервале [fromISO, toISO) —
+    насколько «в прошлое» от начала горизонта уехал старт этапа. */
+export function workingDaysBefore(fromISO: string, toISO: string): number {
+  let count = 0;
+  let cursor = parseISO(fromISO);
+  const end = parseISO(toISO);
+  while (cursor < end) {
+    if (!isWeekend(cursor)) count++;
+    cursor = addDays(cursor, 1);
+  }
+  return count;
 }
 
 /** Если дата выпадает на выходной, сдвигает на ближайший следующий рабочий день. */
@@ -41,6 +54,16 @@ export function generateWorkingDays(startISO: string, count: number): string[] {
     cursor = nextWorkingDay(cursor);
   }
   return result;
+}
+
+/** N-й рабочий день, считая от startISO (0 — сам startISO, нормализованный
+    к рабочему дню). Для дат за пределами сетки расписания. */
+export function addWorkingDays(startISO: string, n: number): string {
+  let cursor = nextWorkingDay(parseISO(startISO));
+  for (let i = 0; i < n; i++) {
+    cursor = nextWorkingDay(addDays(cursor, 1));
+  }
+  return formatISO(cursor);
 }
 
 /** Множество индексов рабочих дней, попадающих в диапазон [from, to] включительно. */

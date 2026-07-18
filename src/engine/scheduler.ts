@@ -9,8 +9,29 @@
 //  - Конфликт двух задач за одного человека решается приоритетом (меньше число = выше).
 //  - Не влезает в горизонт — дата релиза просто едет вправо (этап не теряется).
 
-import type { AppData, StageType } from '../types';
-import { generateWorkingDays, nextReleaseDay, rangeToIndices } from './dates';
+import type { AppData, Employee, StageType } from '../types';
+import {
+  addWorkingDays,
+  generateWorkingDays,
+  nextReleaseDay,
+  rangeToIndices,
+  workingDaysBefore,
+} from './dates';
+
+/**
+ * Пересекается ли непрерывный блок этапа (старт startISO, durationDays рабочих
+ * дней) с недоступностью сотрудника. Используется как запрет ручного
+ * закрепления поверх отпуска/больничного — авторазмещение такие дни и так
+ * обходит, а перетаскиванием этап не должен «вставать в отпуск».
+ */
+export function stageOverlapsUnavailable(
+  emp: Employee,
+  startISO: string,
+  durationDays: number,
+): boolean {
+  const block = generateWorkingDays(startISO, durationDays);
+  return emp.unavailable.some((r) => block.some((d) => d >= r.from && d <= r.to));
+}
 
 /** На сколько рабочих дней вперёд строим расписание (запас за горизонтом для «сдвига вправо»). */
 const SCHEDULING_HORIZON_DAYS = 260; // ~52 недели
@@ -29,6 +50,9 @@ export interface ScheduledStage {
   pinned: boolean;
   /** true — задача завершена (блок рисуется приглушённым и не двигается). */
   done: boolean;
+  /** true — этап начат до начала горизонта: рисуется от левого края с
+      обрезкой, реальный старт — в pinnedStartDate этапа. */
+  clippedStart?: boolean;
 }
 
 export interface TaskRelease {
@@ -130,16 +154,29 @@ export function schedule(data: AppData): ScheduleResult {
 
   // Проход 1: резервируем все закреплённые вручную этапы, чтобы авторазмещение
   // могло обтекать их. Закреплённые блоки могут пересекаться — это покажет перегрузку.
-  const pinned = new Map<string, { start: number; end: number }>();
+  const pinned = new Map<
+    string,
+    { start: number; end: number; clipped: boolean }
+  >();
   for (const task of data.tasks) {
     for (const stage of task.stages) {
       if (!stage.assigneeId || !stage.pinnedStartDate) continue;
-      const start = dayToIndex.get(stage.pinnedStartDate);
-      if (start === undefined) continue; // дата вне горизонта — упадёт в авторежим
+      let start = dayToIndex.get(stage.pinnedStartDate);
+      let clipped = false;
+      if (start === undefined) {
+        // Будущее за расчётной сеткой или выходной — как раньше, авторежим.
+        if (stage.pinnedStartDate >= days[0]) continue;
+        // Прошлое прожито: прожитая часть отрезается, хвост остаётся на своих
+        // датах и занимает исполнителя. Целиком прошедший этап — в проход 2.
+        const lived = workingDaysBefore(stage.pinnedStartDate, days[0]);
+        if (stage.durationDays - lived <= 0) continue;
+        start = -lived; // виртуальный старт до сетки; занимаем только дни >= 0
+        clipped = true;
+      }
       const end = start + stage.durationDays - 1;
-      pinned.set(stage.id, { start, end });
+      pinned.set(stage.id, { start: Math.max(0, start), end, clipped });
       const busy = ensureBusy(stage.assigneeId);
-      for (let d = start; d <= end && d < maxIndex; d++) {
+      for (let d = Math.max(0, start); d <= end && d < maxIndex; d++) {
         busy.add(d);
         markOccupied(stage.assigneeId, d, stage.id);
       }
@@ -151,17 +188,23 @@ export function schedule(data: AppData): ScheduleResult {
     const done = !!task.done;
     let prevEnd = -1; // индекс окончания предыдущего этапа
     let taskEnd = -1;
+    // Конец задачи, целиком прожитой до горизонта: сетка её уже не покрывает,
+    // но дата релиза в таблице не должна пропадать — считаем от пинов напрямую.
+    let pastEndDate: string | null = null;
 
     for (const stage of task.stages) {
-      // Этап завершённой задачи с закреплённой датой, уехавшей за начало
-      // горизонта, — прошлое: выкидываем из расчёта, а не переразмещаем,
-      // иначе он «воскрес» бы и снова занял человека.
+      // Закреплённый этап, целиком оставшийся за началом горизонта, —
+      // прошлое: выкидываем из расчёта, а не переразмещаем, иначе он
+      // «воскрес» бы и снова занял человека. prevEnd не трогаем — следующий
+      // этап задачи может начинаться с начала сетки.
       if (
-        done &&
         stage.pinnedStartDate &&
         !pinned.has(stage.id) &&
-        stage.pinnedStartDate < data.horizonStart
+        stage.pinnedStartDate < data.horizonStart &&
+        (done || stage.assigneeId)
       ) {
+        const end = addWorkingDays(stage.pinnedStartDate, stage.durationDays - 1);
+        if (!pastEndDate || end > pastEndDate) pastEndDate = end;
         scheduledStages.push({
           stageId: stage.id,
           taskId: task.id,
@@ -181,11 +224,13 @@ export function schedule(data: AppData): ScheduleResult {
       const pin = pinned.get(stage.id);
       let startIndex: number;
       let isPinned = false;
+      let isClipped = false;
 
       if (pin) {
         // Закреплён вручную — стоит ровно там (уже зарезервирован в проходе 1).
         startIndex = pin.start;
         isPinned = true;
+        isClipped = pin.clipped;
       } else if (stage.assigneeId) {
         const busy = ensureBusy(stage.assigneeId);
         const unavailable =
@@ -220,8 +265,13 @@ export function schedule(data: AppData): ScheduleResult {
         }
       }
 
-      const endIndex =
-        startIndex === -1 ? -1 : startIndex + stage.durationDays - 1;
+      // У обрезанного этапа конец задан пином (прожитая часть не входит),
+      // у остальных — старт плюс длительность.
+      const endIndex = pin
+        ? pin.end
+        : startIndex === -1
+          ? -1
+          : startIndex + stage.durationDays - 1;
 
       scheduledStages.push({
         stageId: stage.id,
@@ -234,6 +284,7 @@ export function schedule(data: AppData): ScheduleResult {
         endIndex,
         pinned: isPinned,
         done,
+        clippedStart: isClipped || undefined,
       });
 
       if (endIndex >= 0) {
@@ -242,7 +293,9 @@ export function schedule(data: AppData): ScheduleResult {
       }
     }
 
-    const qaEndDate = taskEnd >= 0 ? days[taskEnd] : null;
+    // Если вся задача прожита до горизонта, конец берём из pastEndDate —
+    // дата релиза остаётся в таблице, хотя на ганте задачи уже нет.
+    const qaEndDate = taskEnd >= 0 ? days[taskEnd] : pastEndDate;
     releases.push({
       taskId: task.id,
       taskName: task.name,

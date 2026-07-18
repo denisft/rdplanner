@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { schedule } from './scheduler';
+import { schedule, stageOverlapsUnavailable } from './scheduler';
 import type { AppData, Employee, Task } from '../types';
 
 function emp(id: string, name = id): Employee {
@@ -8,7 +8,7 @@ function emp(id: string, name = id): Employee {
 
 function base(tasks: Task[], employees: Employee[]): AppData {
   // 2026-06-01 — понедельник.
-  return { employees, tasks, horizonStart: '2026-06-01', horizonWeeks: 4 };
+  return { teams: [{ id: 'team-1', name: 'Команда 1' }], employees, tasks, horizonStart: '2026-06-01', horizonWeeks: 4 };
 }
 
 describe('schedule', () => {
@@ -357,6 +357,179 @@ describe('schedule', () => {
     expect(schedule(data).warnings).toHaveLength(0);
   });
 
+  it('закреплённый этап через начало горизонта обрезается: хвост на месте', () => {
+    const data = base(
+      [
+        {
+          id: 't1',
+          name: 'Straddle',
+          priority: 1,
+          stages: [
+            {
+              id: 's1',
+              type: 'development',
+              durationDays: 5,
+              assigneeId: 'dev',
+              // ср 2026-05-27: 3 рабочих дня прожито (27, 28, 29 мая),
+              // хвост в 2 дня попадает на индексы 0-1.
+              pinnedStartDate: '2026-05-27',
+            },
+          ],
+        },
+      ],
+      [emp('dev')],
+    );
+    const r = schedule(data);
+    const s = r.scheduledStages.find((x) => x.stageId === 's1')!;
+    expect(s.startIndex).toBe(0);
+    expect(s.endIndex).toBe(1);
+    expect(s.pinned).toBe(true);
+    expect(s.clippedStart).toBe(true);
+    // Хвост честно занимает исполнителя, дальше — свободно.
+    expect(r.occupancy.get('dev')!.get(0)!.length).toBe(1);
+    expect(r.occupancy.get('dev')!.get(1)!.length).toBe(1);
+    expect(r.occupancy.get('dev')!.get(2)).toBeUndefined();
+    // Релиз считается от конца хвоста: вт 2026-06-02 → чт 2026-06-04.
+    expect(r.releases[0].qaEndDate).toBe('2026-06-02');
+    expect(r.releases[0].releaseDate).toBe('2026-06-04');
+  });
+
+  it('закреплённый этап активной задачи целиком в прошлом не воскресает', () => {
+    const data = base(
+      [
+        {
+          id: 't1',
+          name: 'Half past',
+          priority: 1,
+          stages: [
+            {
+              id: 's1',
+              type: 'architecture',
+              durationDays: 2,
+              assigneeId: 'lead',
+              pinnedStartDate: '2026-05-18', // целиком до горизонта
+            },
+            { id: 's2', type: 'development', durationDays: 3, assigneeId: 'dev' },
+          ],
+        },
+      ],
+      [emp('lead'), emp('dev')],
+    );
+    const r = schedule(data);
+    const past = r.scheduledStages.find((x) => x.stageId === 's1')!;
+    const next = r.scheduledStages.find((x) => x.stageId === 's2')!;
+    expect(past.startIndex).toBe(-1);
+    expect(past.pinned).toBe(true);
+    // Лид свободен, следующий этап может начинаться с начала сетки.
+    expect(r.occupancy.get('lead')).toBeUndefined();
+    expect(next.startIndex).toBe(0);
+    expect(r.warnings).toHaveLength(0);
+  });
+
+  it('обрезанный хвост даёт перегрузку при наложении с другим пином', () => {
+    const data = base(
+      [
+        {
+          id: 't1',
+          name: 'Straddle',
+          priority: 1,
+          stages: [
+            {
+              id: 's1',
+              type: 'development',
+              durationDays: 5,
+              assigneeId: 'dev',
+              pinnedStartDate: '2026-05-27', // хвост на индексах 0-1
+            },
+          ],
+        },
+        {
+          id: 't2',
+          name: 'Pinned',
+          priority: 2,
+          stages: [
+            {
+              id: 's2',
+              type: 'development',
+              durationDays: 2,
+              assigneeId: 'dev',
+              pinnedStartDate: '2026-06-01', // индексы 0-1 — конфликт с хвостом
+            },
+          ],
+        },
+      ],
+      [emp('dev')],
+    );
+    const r = schedule(data);
+    expect(r.occupancy.get('dev')!.get(0)!.length).toBe(2);
+    expect(r.occupancy.get('dev')!.get(1)!.length).toBe(2);
+  });
+
+  it('этап завершённой задачи через границу тоже обрезается, а не выпадает', () => {
+    const data = base(
+      [
+        {
+          id: 'done',
+          name: 'Done straddle',
+          priority: 1,
+          done: true,
+          completedAt: '2026-06-02',
+          stages: [
+            {
+              id: 'sd',
+              type: 'development',
+              durationDays: 5,
+              assigneeId: 'dev',
+              pinnedStartDate: '2026-05-27', // хвост на индексах 0-1
+            },
+          ],
+        },
+        {
+          id: 'active',
+          name: 'Active',
+          priority: 1,
+          stages: [
+            { id: 'sa', type: 'development', durationDays: 2, assigneeId: 'dev' },
+          ],
+        },
+      ],
+      [emp('dev')],
+    );
+    const r = schedule(data);
+    const doneStage = r.scheduledStages.find((s) => s.stageId === 'sd')!;
+    expect(doneStage.startIndex).toBe(0);
+    expect(doneStage.endIndex).toBe(1);
+    expect(doneStage.clippedStart).toBe(true);
+    // Активная обтекает хвост завершённой.
+    expect(r.scheduledStages.find((s) => s.stageId === 'sa')!.startIndex).toBe(2);
+  });
+
+  it('пин на выходном дне по-прежнему падает в авторежим', () => {
+    const data = base(
+      [
+        {
+          id: 't1',
+          name: 'Weekend pin',
+          priority: 1,
+          stages: [
+            {
+              id: 's1',
+              type: 'development',
+              durationDays: 2,
+              assigneeId: 'dev',
+              pinnedStartDate: '2026-06-06', // суббота внутри горизонта
+            },
+          ],
+        },
+      ],
+      [emp('dev')],
+    );
+    const r = schedule(data);
+    const s = r.scheduledStages.find((x) => x.stageId === 's1')!;
+    expect(s.pinned).toBe(false);
+    expect(s.startIndex).toBe(0);
+  });
+
   it('считает дату релиза по последнему этапу', () => {
     const data = base(
       [
@@ -377,5 +550,40 @@ describe('schedule', () => {
     const r = schedule(data);
     const q = r.scheduledStages.find((s) => s.stageId === 'q')!;
     expect(r.releases[0].qaEndIndex).toBe(q.endIndex);
+  });
+});
+
+describe('stageOverlapsUnavailable', () => {
+  // 2026-06-01 — понедельник; отпуск ср–чт первой недели.
+  const vacationer: Employee = {
+    id: 'dev',
+    name: 'dev',
+    specialization: 'backend',
+    unavailable: [{ from: '2026-06-03', to: '2026-06-04' }],
+  };
+
+  it('блок, задевающий отпуск, пересекается', () => {
+    // пн–ср: третий день (ср 03.06) — отпуск
+    expect(stageOverlapsUnavailable(vacationer, '2026-06-01', 3)).toBe(true);
+    // старт прямо в отпуск
+    expect(stageOverlapsUnavailable(vacationer, '2026-06-03', 1)).toBe(true);
+  });
+
+  it('блок до или после отпуска не пересекается', () => {
+    // пн–вт, до отпуска
+    expect(stageOverlapsUnavailable(vacationer, '2026-06-01', 2)).toBe(false);
+    // пт и дальше, после отпуска
+    expect(stageOverlapsUnavailable(vacationer, '2026-06-05', 5)).toBe(false);
+  });
+
+  it('отпуск только на выходных не мешает блоку, накрывающему эти выходные', () => {
+    const weekender: Employee = {
+      id: 'dev',
+      name: 'dev',
+      specialization: 'backend',
+      unavailable: [{ from: '2026-06-06', to: '2026-06-07' }], // сб–вс
+    };
+    // пт–пн: календарно накрывает выходные, но рабочие дни свободны
+    expect(stageOverlapsUnavailable(weekender, '2026-06-05', 2)).toBe(false);
   });
 });

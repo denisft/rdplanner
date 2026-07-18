@@ -4,11 +4,19 @@
 // даёт editKey, который сервер выдаёт при первой публикации и который хранится
 // только в localStorage автора. «Поделиться» перезаписывает тот же план —
 // ссылка остаётся постоянной.
+//
+// Делимся всегда активной командой, поэтому id и секрет храним отдельно на
+// каждую команду (ключ с суффиксом teamId) — у каждой команды своя постоянная
+// ссылка, публикация одной не затирает ссылку другой.
 
 import type { AppData } from '../types';
+import { migrateAppData } from './migrate';
 
 const SHARE_ID_KEY = 'resource-planner:shareId';
 const EDIT_KEY_KEY = 'resource-planner:shareEditKey';
+
+const idKey = (teamId: string) => `${SHARE_ID_KEY}:${teamId}`;
+const editKeyKey = (teamId: string) => `${EDIT_KEY_KEY}:${teamId}`;
 
 /** Секрет не подошёл: старую ссылку обновить или отозвать не получится. */
 export class WrongEditKeyError extends Error {}
@@ -29,24 +37,24 @@ function lsSet(key: string, value: string): void {
   }
 }
 
-export function getShareId(): string | null {
-  return lsGet(SHARE_ID_KEY);
+export function getShareId(teamId: string): string | null {
+  return lsGet(idKey(teamId));
 }
 
-/** Забыть опубликованную ссылку локально (id и секрет). */
-export function clearShare(): void {
+/** Забыть опубликованную ссылку команды локально (id и секрет). */
+export function clearShare(teamId: string): void {
   try {
-    localStorage.removeItem(SHARE_ID_KEY);
-    localStorage.removeItem(EDIT_KEY_KEY);
+    localStorage.removeItem(idKey(teamId));
+    localStorage.removeItem(editKeyKey(teamId));
   } catch {
     // приватный режим — игнорируем
   }
 }
 
-/** Опубликовать текущий план. Переиспользует сохранённый id, если он есть. */
-export async function publishPlan(data: AppData): Promise<string> {
-  const id = getShareId();
-  const editKey = lsGet(EDIT_KEY_KEY);
+/** Опубликовать план команды. Переиспользует сохранённый id команды, если он есть. */
+export async function publishPlan(teamId: string, data: AppData): Promise<string> {
+  const id = getShareId(teamId);
+  const editKey = lsGet(editKeyKey(teamId));
   const res = await fetch('/api/save', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -55,24 +63,24 @@ export async function publishPlan(data: AppData): Promise<string> {
   if (res.status === 403) throw new WrongEditKeyError('Wrong edit key');
   if (!res.ok) throw new Error(`Publish failed: ${res.status}`);
   const json = (await res.json()) as { id: string; editKey?: string };
-  lsSet(SHARE_ID_KEY, json.id);
+  lsSet(idKey(teamId), json.id);
   // Сервер выдаёт секрет при создании плана (и при миграции старых планов).
-  if (json.editKey) lsSet(EDIT_KEY_KEY, json.editKey);
+  if (json.editKey) lsSet(editKeyKey(teamId), json.editKey);
   return json.id;
 }
 
-/** Отозвать ссылку: удалить план с сервера и забыть id/секрет локально. */
-export async function revokePlan(): Promise<void> {
-  const id = getShareId();
+/** Отозвать ссылку команды: удалить план с сервера и забыть id/секрет локально. */
+export async function revokePlan(teamId: string): Promise<void> {
+  const id = getShareId(teamId);
   if (!id) return;
   const res = await fetch('/api/delete', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id, editKey: lsGet(EDIT_KEY_KEY) }),
+    body: JSON.stringify({ id, editKey: lsGet(editKeyKey(teamId)) }),
   });
   if (res.status === 403) throw new WrongEditKeyError('Wrong edit key');
   if (!res.ok) throw new Error(`Revoke failed: ${res.status}`);
-  clearShare();
+  clearShare(teamId);
 }
 
 /** Загрузить опубликованный план по id (для просмотра коллегой). */
@@ -80,7 +88,8 @@ export async function fetchSharedPlan(id: string): Promise<AppData> {
   const res = await fetch(`/api/load?id=${encodeURIComponent(id)}`);
   if (!res.ok) throw new Error(`Load failed: ${res.status}`);
   const json = (await res.json()) as { data: AppData };
-  return json.data;
+  // Опубликованный план мог быть создан в старой схеме — мигрируем.
+  return migrateAppData(json.data);
 }
 
 /** Полная ссылка для отправки коллегам. */

@@ -15,9 +15,12 @@
 
 ## Доменная модель (src/types.ts)
 
-- `AppData = { employees, tasks, horizonStart, horizonWeeks }` — весь стейт приложения, единый объект; любые изменения через `setData`, расписание пересчитывается `useMemo(() => schedule(data))`.
+- `AppData = { teams, employees, tasks, horizonStart, horizonWeeks }` — весь стейт приложения, единый объект; любые изменения через `setData`.
+- Команды (`Team = { id, name }`, `SCHEMA_VERSION = 2`): у `Employee` и `Task` есть `teamId?`. Активная команда — вкладка вверху, личная настройка вида (localStorage `resource-planner:active-team`), **не в AppData**. Логика — вариант A из `resource-planner-ADR-команды.md`: единый глобальный план, «два ганта» = фильтрация вида. `viewData = teamView(data, activeTeamId)` (`src/engine/teams.ts`) — срез по активной команде, на нём считаются `schedule`, гант, релизы, отчёт, экспорт и шаринг; полный `data` остаётся источником истины (setData, автосейв). Люди команд **не пересекаются** — поэтому срез эквивалентен отдельному прогону (инвариант в `teams.test.ts`). Движок про команды не знает. Глобальные операции (сдвиг горизонта) считают `schedule(data)` по всему плану. Новые задачи/сотрудники стампятся `activeTeamId`. Шаринг и экспорт — только активная команда (у каждой свой share-id: ключ `resource-planner:shareId:{teamId}`). Управление командами — в меню «Файл» (переименовать/добавить/удалить; удаление каскадное, последнюю нельзя). Миграция v1→v2 — `src/storage/migrate.ts` (заворачивает старый план в «Команда 1»), прогоняется во всех точках загрузки.
+- `Task = { id, name, teamId?, priority, stages[], done?, completedAt? }`. Приоритет: **меньше число = выше**, решает конфликты за человека (сравним в пределах команды — люди не пересекаются).
 - `Task = { id, name, priority, stages[], done?, completedAt? }`. Приоритет: **меньше число = выше**, решает конфликты за человека.
 - Завершение задачи (`src/engine/complete.ts`): `completeTask` ставит `done` и замораживает этапы — закрепляет их на текущих рассчитанных датах, чтобы история не ездила. На ганте — серый блок «✓», не таскается; в таблице — свёрнутая секция «Завершённые» (вернуть в работу / удалить). Завершённые продолжают занимать людей, но исключены из CSV/.md-экспортов и предупреждений; их закреплённые этапы, уехавшие за начало горизонта, выпадают из расчёта («прошлое не воскресает»).
+- Сдвиг начала горизонта (`src/engine/horizon.ts`, БЛ-4): кнопка «⇤ К текущей неделе» = фиксация прошлого, не перепланирование — `shiftHorizonStart` закрепляет всё, что начинается раньше новой границы, на текущих датах (по образцу `completeTask`) и переносит `horizonStart` на понедельник предыдущей недели (`shiftTarget`). Инвариант: даты релизов не меняются (тест в `horizon.test.ts`).
 - Этапы строго последовательны: `architecture → development → review → qa` (у задачи может быть подмножество). `Stage = { id, type, durationDays, assigneeId, pinnedStartDate? }`.
 - Специализации: `lead | backend | frontend | qa`. Кто что может (`src/roles.ts`): architecture и review — только lead; qa — только qa; development — backend/frontend/lead.
 - Время — только рабочие дни пн–пт, даты — строки `YYYY-MM-DD` (без Date в стейте, чтобы не зависеть от таймзоны). `Employee.unavailable` — диапазоны отпусков/больничных.
@@ -31,16 +34,18 @@
 - Дата релиза = ближайший **вт или чт строго после** окончания QA (`nextReleaseDay` в dates.ts).
 - Этап без исполнителя учитывается по времени, но не занимает ничью загрузку (warning).
 - `occupancy: employeeId -> dayIndex -> stageId[]` — >1 элемента = перегрузка (`overloadedDays`).
+- «Прошлое прожито»: закреплённый этап с `pinnedStartDate` раньше `horizonStart` не переразмещается — прожитая часть отрезается, хвост занимает исполнителя (`clippedStart: true`, на ганте блок с пунктирным левым краем); целиком прошедший этап выпадает из сетки, но дата релиза задачи считается от пинов напрямую (`addWorkingDays`) и в таблице не пропадает.
 
 ## Карта файлов
 
 - `src/App.tsx` — корневой компонент: весь стейт, тулбар (горизонт, сохранить/загрузить/поделиться), undo/redo (стеки снимков `data`, Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y), таблица «Задачи и даты релизов», режим read-only при `?plan=...`
-- `src/components/GanttChart.tsx` — гант: строки сотрудников по специализациям, interval-раскладка пересекающихся этапов по дорожкам, drag&drop (бросок = закрепление `pinnedStartDate`, двойной клик — открепить, Alt+двойной клик — открыть задачу на редактирование), маркеры «сегодня» и релизов 🚀, проп `showReleases`. Константы: CELL=34px, NAME_W=200, LANE_H=24
+- `src/components/GanttChart.tsx` — гант: строки сотрудников по специализациям, interval-раскладка пересекающихся этапов по дорожкам, drag&drop (бросок = закрепление `pinnedStartDate`, двойной клик — открепить, Alt+двойной клик — открыть задачу на редактирование), маркеры «сегодня» и релизов 🚀, автоскролл к «сегодня» при открытии + кнопка «сегодня» в sticky-ячейке шапки, проп `showReleases`. Константы: CELL=34px, NAME_W=200, LANE_H=24
 - `src/components/TaskForm.tsx` — модалка создания/редактирования задачи (этапы, длительности, исполнители из `assigneePool`)
 - `src/components/EmployeeManager.tsx` — модалка сотрудников (добавление, специализация, недоступность)
 - `src/components/stageStyle.ts` — цвета этапов (indigo/sky/amber/emerald) и приоритетов
 - `src/engine/complete.ts` — завершение задачи (заморозка этапов) и возврат в работу
-- `src/engine/dates.ts` — рабочие дни, parseISO/formatISO, nextReleaseDay (вт/чт)
+- `src/engine/horizon.ts` — сдвиг начала горизонта: `shiftTarget` (понедельник предыдущей недели) и `shiftHorizonStart` (закрепление прошлого + перенос `horizonStart`)
+- `src/engine/dates.ts` — рабочие дни, parseISO/formatISO, nextReleaseDay (вт/чт), workingDaysBefore/addWorkingDays (расчёты за пределами сетки)
 - `src/data/sampleData.ts` — демо-данные (кнопка «Демо»)
 - `api/save.ts`, `api/load.ts`, `api/delete.ts` — serverless-функции Vercel для шаринга, Upstash Redis (env: `KV_REST_API_URL/TOKEN` или `UPSTASH_REDIS_REST_*`), ключи `plan:{id}`. Общий код — `api/_lib.ts` (redis, rate limiting, sha256, TTL год с продлением на чтении/записи); валидация и лимиты — `src/share/planGuards.ts` (лежит в src, чтобы покрываться tsc и тестами)
 
@@ -48,7 +53,7 @@
 
 - Автосейв всего `AppData` в localStorage (`resource-planner:data`) при каждом изменении; сохранение/загрузка в файл — File System Access API (Chrome/Edge) с фолбэком на скачивание/`<input type=file>`. Формат файла: `{ version: SCHEMA_VERSION, data }`.
 - Шаринг: «Поделиться» публикует план через `/api/save`; в localStorage запоминаются id (`resource-planner:shareId`) и секрет владельца (`resource-planner:shareEditKey`) — повторная публикация перезаписывает тот же план, ссылка постоянная. Ссылка `?plan=id` даёт только чтение; перезапись и отзыв требуют editKey (в записи хранится его sha256-хэш). «Отозвать ссылку» в меню «Файл» удаляет план с сервера (`/api/delete`). Перед первой публикацией — предупреждение, что имена сотрудников и отпуска уходят на сервер.
-- Настройки вида — личные предпочтения зрителя, хранить в localStorage отдельными ключами, **не в AppData** (она уходит в файл и в общую ссылку). Пример: `resource-planner:show-releases` — чекбокс «🚀 Релизы на ганте» в легенде.
+- Настройки вида — личные предпочтения зрителя, хранить в localStorage отдельными ключами, **не в AppData** (она уходит в файл и в общую ссылку). Примеры: `resource-planner:show-releases` — чекбокс «🚀 Релизы на ганте» в легенде; `resource-planner:shift-nudge-dismissed` — закрытие плашки «сдвиньте начало горизонта» до конца дня.
 
 ## Договорённости
 

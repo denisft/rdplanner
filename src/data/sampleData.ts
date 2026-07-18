@@ -8,8 +8,11 @@ import type { AppData, Employee, Task, Stage, StageType } from '../types';
 let seq = 0;
 const uid = (prefix: string) => `${prefix}-${++seq}`;
 
+// Демо — одна команда; teamId проставляется людям и задачам ниже.
+const TEAM_ID = 'team-1';
+
 function e(name: string, specialization: Employee['specialization']): Employee {
-  return { id: uid('emp'), name, specialization, unavailable: [] };
+  return { id: uid('emp'), name, specialization, teamId: TEAM_ID, unavailable: [] };
 }
 
 // --- Команда ---
@@ -46,7 +49,7 @@ function stage(
 }
 
 function task(name: string, priority: number, stages: Stage[]): Task {
-  return { id: uid('task'), name, priority, stages };
+  return { id: uid('task'), name, priority, stages, teamId: TEAM_ID };
 }
 
 export const sampleTasks: Task[] = [
@@ -114,6 +117,7 @@ export const sampleTasks: Task[] = [
 
 export function makeSampleData(): AppData {
   return {
+    teams: [{ id: TEAM_ID, name: 'Команда 1' }],
     employees: sampleEmployees,
     tasks: sampleTasks,
     horizonStart: '2026-06-01',

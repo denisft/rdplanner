@@ -1,6 +1,12 @@
 // Доменная модель планировщика ресурсов.
 // Время измеряется в рабочих днях (пн–пт). Единица планирования — 1 день.
 
+/** Команда разработки: свой набор людей и задач, свой гант. */
+export interface Team {
+  id: string;
+  name: string;
+}
+
 export type Specialization = 'lead' | 'backend' | 'frontend' | 'qa';
 
 export const SPECIALIZATION_LABELS: Record<Specialization, string> = {
@@ -27,6 +33,9 @@ export interface Employee {
   id: string;
   name: string;
   specialization: Specialization;
+  /** К какой команде относится человек. Проставляется миграцией (см.
+      storage/migrate.ts) — у данных, загруженных с диска/по ссылке, всегда есть. */
+  teamId?: string;
   /** Дни, когда человек недоступен. */
   unavailable: DateRange[];
   /**
@@ -72,6 +81,9 @@ export interface Stage {
 export interface Task {
   id: string;
   name: string;
+  /** К какой команде относится задача. Проставляется миграцией (см.
+      storage/migrate.ts) — у данных, загруженных с диска/по ссылке, всегда есть. */
+  teamId?: string;
   /** Ручной приоритет: меньше число = выше приоритет. Решает конфликты за человека. */
   priority: number;
   /** Этапы в порядке выполнения. У задачи может быть не весь набор из 4 этапов. */
@@ -87,6 +99,8 @@ export interface Task {
 }
 
 export interface AppData {
+  /** Команды. Всегда непусто (миграция создаёт дефолтную «Команда 1»). */
+  teams: Team[];
   employees: Employee[];
   tasks: Task[];
   /** Начало горизонта планирования, YYYY-MM-DD. */
@@ -95,7 +109,8 @@ export interface AppData {
   horizonWeeks: number;
 }
 
-export const SCHEMA_VERSION = 1;
+// v2: добавлены команды (teams + teamId у сотрудников и задач).
+export const SCHEMA_VERSION = 2;
 
 export interface SavedFile {
   version: number;

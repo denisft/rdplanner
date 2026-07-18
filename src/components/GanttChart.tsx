@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { AppData, Employee, Specialization, StageType } from '../types';
 import { SPECIALIZATION_LABELS, SPECIALIZATION_ORDER, STAGE_LABELS } from '../types';
 import type { ScheduleResult, ScheduledStage } from '../engine/scheduler';
@@ -65,16 +65,20 @@ export function GanttChart({
   onUnpinStage,
   onEditTask,
 }: Props) {
-  // Что тащим: тип этапа (для проверки ролей) и текущий исполнитель — его
+  // Что тащим: тип этапа (для проверки ролей), текущий исполнитель — его
   // строка принимает этап всегда, даже если по ролям он этап вести «не может»
-  // (иначе этап, назначенный вопреки ролям, было бы не сдвинуть по датам).
+  // (иначе этап, назначенный вопреки ролям, было бы не сдвинуть по датам) —
+  // и длительность, чтобы не подсвечивать дни, где блок лёг бы на отпуск.
   const [dragging, setDragging] = useState<{
     type: StageType;
     assigneeId: string | null;
+    durationDays: number;
   } | null>(null);
   // Выбранная задача: подсвечиваем все её этапы (архитектура/разработка/ревью/QA),
   // остальные блоки притеняем. Клик по тому же этапу или по фону — снять выбор.
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  // Скролл-контейнер — для автопрокрутки к «сегодня» и кнопки «сегодня».
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   const visibleDays = data.horizonWeeks * 5;
   const days = result.days.slice(0, visibleDays);
@@ -110,6 +114,37 @@ export function GanttChart({
   const todayExact = todayIndex >= 0;
   if (!todayExact) todayIndex = days.findIndex((d) => d >= todayISO);
 
+  // Прокрутка к «сегодня»: колонка сразу после закреплённой колонки имён,
+  // с одним рабочим днём контекста слева. Имена — sticky, их скролл не трогает.
+  const scrollToToday = () => {
+    if (todayIndex > 0 && scrollRef.current) {
+      scrollRef.current.scrollLeft = Math.max(0, (todayIndex - 1) * CELL);
+    }
+  };
+  // При открытии сразу показываем сегодняшний день (живой план «уезжает»
+  // вправо от начала горизонта, докручивать руками каждый раз — боль).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(scrollToToday, []);
+
+  // Реальные даты старта закреплённых этапов — для подсказки на блоках,
+  // обрезанных началом горизонта (их видимый старт — не настоящий).
+  const pinnedStartById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const t of data.tasks)
+      for (const st of t.stages)
+        if (st.pinnedStartDate) m.set(st.id, st.pinnedStartDate);
+    return m;
+  }, [data.tasks]);
+
+  // Полные длительности этапов — у обрезанных блоков видимая ширина меньше
+  // реальной, а при перетаскивании этап закрепляется целиком.
+  const durationById = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const t of data.tasks)
+      for (const st of t.stages) m.set(st.id, st.durationDays);
+    return m;
+  }, [data.tasks]);
+
   // Дни релизов по задачам -> индекс в видимой сетке (в один день могут попасть
   // несколько задач — показываем один флажок со счётчиком). Релизы за правым
   // краем горизонта собираем отдельно и помечаем флажком «позже» у края.
@@ -134,6 +169,7 @@ export function GanttChart({
 
   return (
     <div
+      ref={scrollRef}
       className={`rounded-xl bg-white shadow-card ${
         fillHeight ? 'h-full overflow-auto' : 'overflow-x-auto'
       }`}
@@ -145,9 +181,18 @@ export function GanttChart({
         <div className="flex border-b border-slate-200 bg-slate-50">
           <div
             style={{ width: NAME_W }}
-            className="sticky left-0 z-30 shrink-0 bg-slate-50 px-3 py-1 font-medium text-slate-500"
+            className="sticky left-0 z-30 flex shrink-0 items-center justify-between bg-slate-50 px-3 py-1 font-medium text-slate-500"
           >
             Сотрудник
+            {todayIndex > 0 && (
+              <button
+                onClick={scrollToToday}
+                title="Прокрутить гант к сегодняшнему дню"
+                className="rounded-full border border-slate-300 px-2 text-[11px] font-normal text-slate-500 hover:bg-slate-100"
+              >
+                сегодня
+              </button>
+            )}
           </div>
           {weeks.map((w, i) => (
             <div
@@ -204,6 +249,8 @@ export function GanttChart({
                   emp={emp}
                   days={days}
                   layout={layoutRow(emp.id, days.length, result, stageById)}
+                  pinnedStartById={pinnedStartById}
+                  durationById={durationById}
                   dragging={dragging}
                   setDragging={setDragging}
                   selectedTaskId={selectedTaskId}
@@ -408,6 +455,8 @@ function EmployeeRow({
   emp,
   days,
   layout,
+  pinnedStartById,
+  durationById,
   dragging,
   setDragging,
   selectedTaskId,
@@ -419,8 +468,22 @@ function EmployeeRow({
   emp: Employee;
   days: string[];
   layout: RowLayout;
-  dragging: { type: StageType; assigneeId: string | null } | null;
-  setDragging: (d: { type: StageType; assigneeId: string | null } | null) => void;
+  /** stageId -> реальная дата закреплённого старта (для обрезанных блоков). */
+  pinnedStartById: Map<string, string>;
+  /** stageId -> полная длительность этапа в рабочих днях. */
+  durationById: Map<string, number>;
+  dragging: {
+    type: StageType;
+    assigneeId: string | null;
+    durationDays: number;
+  } | null;
+  setDragging: (
+    d: {
+      type: StageType;
+      assigneeId: string | null;
+      durationDays: number;
+    } | null,
+  ) => void;
   selectedTaskId: string | null;
   setSelectedTaskId: (id: string | null) => void;
   onMoveStage: (stageId: string, employeeId: string, isoDate: string) => void;
@@ -435,10 +498,22 @@ function EmployeeRow({
     dragging !== null &&
     (stageAllows(dragging.type, emp) || dragging.assigneeId === emp.id);
 
+  // Можно ли бросить на день `i`: блок этапа (i .. i+длительность-1) не должен
+  // задевать отпуск/больничный. Дни за видимой сеткой перепроверяет moveStage
+  // по реальным датам недоступности.
+  const canDropAt = (i: number) => {
+    if (!droppable || dragging === null) return false;
+    for (let d = i; d < i + dragging.durationDays; d++) {
+      if (unavailable.titles.has(d)) return false;
+    }
+    return true;
+  };
+
   const dropOnDay = (e: React.DragEvent, dayIndex: number) => {
     const stageId = e.dataTransfer.getData(DRAG_KEY);
-    if (stageId && droppable) {
-      onMoveStage(stageId, emp.id, days[Math.min(dayIndex, days.length - 1)]);
+    const day = Math.min(dayIndex, days.length - 1);
+    if (stageId && canDropAt(day)) {
+      onMoveStage(stageId, emp.id, days[day]);
     }
     setDragging(null);
   };
@@ -491,7 +566,7 @@ function EmployeeRow({
               }`}
               title={unavailable.titles.get(i)}
               onDragOver={(e) => {
-                if (droppable) e.preventDefault();
+                if (canDropAt(i)) e.preventDefault();
               }}
               onDrop={(e) => dropOnDay(e, i)}
             />
@@ -530,7 +605,11 @@ function EmployeeRow({
                 if (s.done) return;
                 e.dataTransfer.setData(DRAG_KEY, s.stageId);
                 e.dataTransfer.effectAllowed = 'move';
-                setDragging({ type: s.type, assigneeId: s.assigneeId });
+                setDragging({
+                  type: s.type,
+                  assigneeId: s.assigneeId,
+                  durationDays: durationById.get(s.stageId) ?? 1,
+                });
               }}
               onDragEnd={() => setDragging(null)}
               onDoubleClick={(e) => {
@@ -541,7 +620,11 @@ function EmployeeRow({
                 else if (s.pinned && !s.done) onUnpinStage(s.stageId);
               }}
               onDragOver={(e) => {
-                if (droppable) e.preventDefault();
+                // Поверх чужого блока: целевой день — по позиции курсора.
+                const rect = e.currentTarget.getBoundingClientRect();
+                const day =
+                  visStart + Math.floor((e.clientX - rect.left) / CELL);
+                if (canDropAt(Math.min(day, days.length - 1))) e.preventDefault();
               }}
               onDrop={(e) => {
                 // Сброс поверх чужого блока: день вычисляем по позиции курсора.
@@ -554,13 +637,25 @@ function EmployeeRow({
                 top: lane * LANE_H + 2,
                 height: LANE_H - 4,
               }}
-              className={`absolute flex items-center rounded-sm transition-opacity ${
+              className={`absolute flex items-center transition-opacity ${
                 s.done ? `cursor-default ${DONE_STAGE_STYLE}` : `cursor-grab ${STAGE_STYLE[s.type]}`
               } ${s.pinned && !s.done ? 'border border-white/80' : ''} ${
+                s.clippedStart
+                  ? 'rounded-r-sm border-l-2 border-l-white/90 [border-left-style:dashed]'
+                  : 'rounded-sm'
+              } ${
                 selected ? 'z-10 ring-2 ring-slate-900 ring-offset-1' : ''
               } ${dimmed ? 'opacity-25' : ''}`}
               title={`${s.taskName} · ${STAGE_LABELS[s.type]}${
                 s.done ? '\n✓ задача завершена' : ''
+              }${
+                s.clippedStart
+                  ? `\nначат ${
+                      pinnedStartById.has(s.stageId)
+                        ? shortLabel(pinnedStartById.get(s.stageId)!)
+                        : 'ранее'
+                    } — до начала горизонта, прожитая часть скрыта`
+                  : ''
               }${
                 conflictsWith
                   ? '\nНАЛОЖЕНИЕ с: ' + conflictsWith.join('; ')

@@ -4,6 +4,7 @@
 
 import type { AppData, SavedFile } from '../types';
 import { SCHEMA_VERSION } from '../types';
+import { migrateAppData } from './migrate';
 
 const LS_KEY = 'resource-planner:data';
 
@@ -45,8 +46,9 @@ function serialize(data: AppData): string {
 function deserialize(text: string): AppData {
   const parsed = JSON.parse(text) as SavedFile | AppData;
   // Поддержка как обёрнутого формата, так и «голого» AppData.
-  if ((parsed as SavedFile).data) return (parsed as SavedFile).data;
-  return parsed as AppData;
+  const raw = (parsed as SavedFile).data ?? (parsed as AppData);
+  // Приводим к текущей схеме (старые планы — без команд).
+  return migrateAppData(raw);
 }
 
 /** Сохранить в файл. Возвращает handle для последующей перезаписи без диалога. */

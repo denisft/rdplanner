@@ -9,7 +9,7 @@ function emp(id: string, name = id): Employee {
 
 function base(tasks: Task[], employees: Employee[]): AppData {
   // 2026-06-01 — понедельник.
-  return { employees, tasks, horizonStart: '2026-06-01', horizonWeeks: 4 };
+  return { teams: [{ id: 'team-1', name: 'Команда 1' }], employees, tasks, horizonStart: '2026-06-01', horizonWeeks: 4 };
 }
 
 describe('buildPeriodReport', () => {
