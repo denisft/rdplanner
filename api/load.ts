@@ -9,8 +9,8 @@ import {
   type ApiRequest,
   type ApiResponse,
   type PlanRecord,
-} from './_lib';
-import { PLAN_ID_RE } from '../src/share/planGuards';
+} from './_lib.js';
+import { PLAN_ID_RE } from '../src/share/planGuards.js';
 
 export default async function handler(req: ApiRequest, res: ApiResponse) {
   if (req.method !== 'GET') {

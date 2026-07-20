@@ -14,14 +14,14 @@ import {
   type ApiRequest,
   type ApiResponse,
   type PlanRecord,
-} from './_lib';
+} from './_lib.js';
 import {
   EDIT_KEY_RE,
   MAX_PLAN_BYTES,
   PLAN_ID_RE,
   planSizeBytes,
   validatePlanData,
-} from '../src/share/planGuards';
+} from '../src/share/planGuards.js';
 
 export default async function handler(req: ApiRequest, res: ApiResponse) {
   if (req.method !== 'POST') {
