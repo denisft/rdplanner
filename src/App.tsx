@@ -238,11 +238,16 @@ export default function App() {
     return Math.max(1, min);
   }, [viewData.tasks]);
 
-  // Новая задача попадает в активную команду.
+  // Новая задача попадает в активную команду. earliestStart = сегодня —
+  // мягкая граница, чтобы задача вставала от текущего дня, а не от начала
+  // горизонта (в прошлое). На старые задачи не влияет (у них поля нет).
   const addTask = (task: Task) =>
     setData((d) => ({
       ...d,
-      tasks: [...d.tasks, { ...task, teamId: effectiveTeamId }],
+      tasks: [
+        ...d.tasks,
+        { ...task, teamId: effectiveTeamId, earliestStart: formatISO(new Date()) },
+      ],
     }));
 
   const updateTask = (task: Task) =>

@@ -106,6 +106,15 @@ export function schedule(data: AppData): ScheduleResult {
   const dayToIndex = new Map<string, number>();
   days.forEach((d, i) => dayToIndex.set(d, i));
 
+  // Индекс первого рабочего дня не раньше даты — для мягкой границы старта
+  // (task.earliestStart). Дата раньше начала сетки → 0 (границы нет),
+  // позже конца сетки → maxIndex (в видимую сетку не влезет, уедет вправо).
+  const floorIndexOf = (dateISO: string): number => {
+    if (dateISO <= days[0]) return 0;
+    const i = days.findIndex((d) => d >= dateISO);
+    return i < 0 ? maxIndex : i;
+  };
+
   // Недоступность по сотрудникам -> множества индексов.
   const unavailableByEmployee = new Map<string, Set<number>>();
   for (const emp of data.employees) {
@@ -186,6 +195,9 @@ export function schedule(data: AppData): ScheduleResult {
   // Проход 2: размещаем по порядку приоритета, обтекая закреплённые этапы.
   for (const task of orderedTasks) {
     const done = !!task.done;
+    // Мягкая граница старта: незакреплённые этапы не размещаются раньше неё.
+    // Существующие задачи без earliestStart её не имеют — их раскладка не меняется.
+    const startFloor = task.earliestStart ? floorIndexOf(task.earliestStart) : 0;
     let prevEnd = -1; // индекс окончания предыдущего этапа
     let taskEnd = -1;
     // Конец задачи, целиком прожитой до горизонта: сетка её уже не покрывает,
@@ -220,7 +232,7 @@ export function schedule(data: AppData): ScheduleResult {
         continue;
       }
 
-      const earliest = prevEnd + 1;
+      const earliest = Math.max(prevEnd + 1, startFloor);
       const pin = pinned.get(stage.id);
       let startIndex: number;
       let isPinned = false;

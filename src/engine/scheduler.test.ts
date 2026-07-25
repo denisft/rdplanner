@@ -530,6 +530,75 @@ describe('schedule', () => {
     expect(s.startIndex).toBe(0);
   });
 
+  it('earliestStart сдвигает старт новой задачи от границы, а не от начала горизонта', () => {
+    // horizonStart 2026-06-01 (пн); граница 2026-06-08 (след. пн) — индекс 5.
+    const data = base(
+      [
+        {
+          id: 't1',
+          name: 'Новая',
+          priority: 1,
+          earliestStart: '2026-06-08',
+          stages: [
+            { id: 's1', type: 'development', durationDays: 2, assigneeId: 'dev' },
+          ],
+        },
+      ],
+      [emp('dev')],
+    );
+    const s = schedule(data).scheduledStages.find((x) => x.stageId === 's1')!;
+    expect(s.startIndex).toBe(5); // не 0
+    expect(s.pinned).toBe(false); // граница мягкая, не пин
+  });
+
+  it('earliestStart раньше начала горизонта не даёт эффекта', () => {
+    const data = base(
+      [
+        {
+          id: 't1',
+          name: 'Старая',
+          priority: 1,
+          earliestStart: '2026-05-01', // до horizonStart
+          stages: [
+            { id: 's1', type: 'development', durationDays: 2, assigneeId: 'dev' },
+          ],
+        },
+      ],
+      [emp('dev')],
+    );
+    const s = schedule(data).scheduledStages.find((x) => x.stageId === 's1')!;
+    expect(s.startIndex).toBe(0);
+  });
+
+  it('earliestStart не мешает обтеканию: занятый день пропускается', () => {
+    // Приоритетная задача без границы занимает дни 0–1; вторая с границей
+    // на индекс 0 всё равно встаёт после неё (обтекание), а не в перегрузку.
+    const data = base(
+      [
+        {
+          id: 'hi',
+          name: 'Приоритетная',
+          priority: 1,
+          stages: [
+            { id: 'h1', type: 'development', durationDays: 2, assigneeId: 'dev' },
+          ],
+        },
+        {
+          id: 'lo',
+          name: 'С границей',
+          priority: 2,
+          earliestStart: '2026-06-01', // = horizonStart, граница = индекс 0
+          stages: [
+            { id: 'l1', type: 'development', durationDays: 2, assigneeId: 'dev' },
+          ],
+        },
+      ],
+      [emp('dev')],
+    );
+    const s = schedule(data).scheduledStages.find((x) => x.stageId === 'l1')!;
+    expect(s.startIndex).toBe(2); // обтекает занятые 0–1
+  });
+
   it('считает дату релиза по последнему этапу', () => {
     const data = base(
       [
