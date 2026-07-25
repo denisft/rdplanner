@@ -14,6 +14,8 @@ import {
 } from '../export/reportMarkdown';
 import { buildWeeklyLoadReport } from '../engine/weeklyLoad';
 import { downloadWeeklyLoadCsv } from '../export/weeklyLoadCsv';
+import { buildTaskSizingReport } from '../engine/taskSizing';
+import { downloadTaskSizingCsv } from '../export/taskSizingCsv';
 import { formatISO, parseISO, SHORT_MONTHS, SHORT_WEEKDAYS } from '../engine/dates';
 
 interface Props {
@@ -209,7 +211,21 @@ export function ReportModal({ data, result, onClose }: Props) {
               className="rounded-full border border-slate-300 px-3.5 py-1.5 text-sm hover:bg-slate-100 disabled:opacity-40"
               title="CSV по неделям: эпик × сотрудник × % загрузки — открыть в Excel"
             >
-              Скачать .csv
+              Загрузка .csv
+            </button>
+            <button
+              onClick={() =>
+                downloadTaskSizingCsv(
+                  buildTaskSizingReport(data, result, from, to),
+                  from,
+                  to,
+                )
+              }
+              disabled={report.totalDays === 0}
+              className="rounded-full border border-slate-300 px-3.5 py-1.5 text-sm hover:bg-slate-100 disabled:opacity-40"
+              title="CSV: задачи периода с размером XS–XL по сумме длительностей этапов"
+            >
+              Трудоёмкость .csv
             </button>
           </span>
         </div>
