@@ -4,7 +4,7 @@
 
 import { useMemo, useState } from 'react';
 import type { AppData } from '../types';
-import { SPECIALIZATION_LABELS, STAGE_LABELS } from '../types';
+import { SPECIALIZATION_LABELS, STAGE_LABELS, STAGE_ORDER } from '../types';
 import type { ScheduleResult } from '../engine/scheduler';
 import { buildPeriodReport } from '../engine/report';
 import type { EmployeePeriodReport } from '../engine/report';
@@ -16,6 +16,8 @@ import { buildWeeklyLoadReport } from '../engine/weeklyLoad';
 import { downloadWeeklyLoadCsv } from '../export/weeklyLoadCsv';
 import { buildTaskSizingReport } from '../engine/taskSizing';
 import { downloadTaskSizingCsv } from '../export/taskSizingCsv';
+import { buildTaskEffortReport } from '../engine/taskEffort';
+import { downloadTaskEffortCsv } from '../export/taskEffortCsv';
 import { formatISO, parseISO, SHORT_MONTHS, SHORT_WEEKDAYS } from '../engine/dates';
 
 interface Props {
@@ -99,6 +101,11 @@ export function ReportModal({ data, result, onClose }: Props) {
 
   const report = useMemo(
     () => buildPeriodReport(data, result, from, to),
+    [data, result, from, to],
+  );
+
+  const effort = useMemo(
+    () => buildTaskEffortReport(data, result, from, to),
     [data, result, from, to],
   );
 
@@ -227,6 +234,14 @@ export function ReportModal({ data, result, onClose }: Props) {
             >
               Трудоёмкость .csv
             </button>
+            <button
+              onClick={() => downloadTaskEffortCsv(effort, from, to)}
+              disabled={effort.length === 0}
+              className="rounded-full border border-slate-300 px-3.5 py-1.5 text-sm hover:bg-slate-100 disabled:opacity-40"
+              title="CSV: дни и часы задач в периоде с разбивкой по этапам"
+            >
+              Часы .csv
+            </button>
           </span>
         </div>
 
@@ -328,6 +343,67 @@ export function ReportModal({ data, result, onClose }: Props) {
                 </ul>
               ) : (
                 <p className="text-xs text-slate-400">Нет релизов в периоде.</p>
+              )}
+            </section>
+
+            {/* Часы по задачам: дни этапов, попавшие в период, часы = дни × 8 */}
+            <section>
+              <h3 className="mb-2 text-sm font-semibold text-slate-700">
+                Часы по задачам ({effort.length})
+              </h3>
+              {effort.length > 0 ? (
+                <>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-slate-200 text-left text-xs text-slate-400">
+                          <th className="py-1 pr-2 font-normal">Задача</th>
+                          {STAGE_ORDER.map((t) => (
+                            <th key={t} className="px-2 py-1 text-right font-normal">
+                              {STAGE_LABELS[t]}
+                            </th>
+                          ))}
+                          <th className="px-2 py-1 text-right font-normal">Дней</th>
+                          <th className="pl-2 py-1 text-right font-normal">Часов</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {effort.map((r) => (
+                          <tr key={r.taskId} className="border-b border-slate-100">
+                            <td
+                              className={`py-1 pr-2 ${
+                                r.done ? 'text-slate-400 line-through' : 'text-slate-700'
+                              }`}
+                            >
+                              {r.taskName}
+                              {r.done && ' ✓'}
+                            </td>
+                            {STAGE_ORDER.map((t) => (
+                              <td
+                                key={t}
+                                className="px-2 py-1 text-right tabular-nums text-slate-600"
+                              >
+                                {r.byType[t] > 0 ? r.byType[t] : '—'}
+                              </td>
+                            ))}
+                            <td className="px-2 py-1 text-right font-medium tabular-nums text-slate-700">
+                              {r.totalDays}
+                            </td>
+                            <td className="pl-2 py-1 text-right font-medium tabular-nums text-slate-700">
+                              {r.totalHours}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <p className="mt-1.5 text-xs text-slate-400">
+                    Дни этапов по плану, попавшие в период; часы — из расчёта 8 ч.
+                    в рабочем дне.
+                  </p>
+                </>
+              ) : (
+                <p className="text-xs text-slate-400">Нет задач в периоде.</p>
               )}
             </section>
 

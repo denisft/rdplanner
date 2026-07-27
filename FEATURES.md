@@ -60,13 +60,14 @@
 | Экспорт плана в `.md` | ✅ | — | `src/export/markdownExport.ts` | базовый |
 | Экспорт таблицы релизов в CSV | ✅ | [releasenote.md](releasenote.md) (2026-07-03) | `src/export/csvExport.ts` · `csvExport.test.ts` | 2026-07-03 |
 | Гант на весь экран (⛶) | ✅ | [releasenote.md](releasenote.md) (2026-07-03) | `src/components/GanttChart.tsx` | 2026-07-03 |
-| Демо-данные | ✅ | — | `src/data/sampleData.ts` | базовый |
+| Демо-данные (первый экран/«Демо» перебазируются на текущую неделю) | ✅ | [releasenote.md](releasenote.md) (2026-07-25) | `src/data/sampleData.ts` · `src/engine/dates.ts` (`mondayOfWeek`) | 2026-07-25 |
 | Завершение задач (заморозка этапов, секция «Завершённые») | ✅ | [releasenote.md](releasenote.md) (2026-07-09) | `src/engine/complete.ts` · `complete.test.ts` | 2026-07-09 |
 | Отчёт за период (занятость, перегруз/недогруз, старты/релизы) | ✅ | [releasenote.md](releasenote.md) (2026-07-09) | `src/engine/report.ts` · `report.test.ts` · `src/components/ReportModal.tsx` | 2026-07-09 |
 | CSV загрузки команды по неделям (% занятости) | ✅ | [releasenote.md](releasenote.md) (2026-07-10) | `src/engine/weeklyLoad.ts` · `src/export/weeklyLoadCsv.ts` · тесты | 2026-07-10 |
 | Редизайн MatDash (Manrope, карточки, палитра) | ✅ | [releasenote.md](releasenote.md) (2026-07-11) | `src/components/stageStyle.ts` и стили | 2026-07-11 |
 | CSV трудоёмкости (размер в футболках XS–XL) | ✅ | [releasenote.md](releasenote.md) (2026-07-23) | `src/engine/taskSizing.ts` · `taskSizing.test.ts` · `src/export/taskSizingCsv.ts` | 2026-07-23 |
 | Новая задача стартует от сегодня, а не от начала горизонта (`earliestStart`) | ✅ | [releasenote.md](releasenote.md) (2026-07-25) | `src/types.ts` · `src/engine/scheduler.ts` · `scheduler.test.ts` | 2026-07-25 |
+| Часы по задачам за период (дни/часы по этапам, таблица в отчёте + CSV) | ✅ | [releasenote.md](releasenote.md) (2026-07-27) | `src/engine/taskEffort.ts` · `taskEffort.test.ts` · `src/export/taskEffortCsv.ts` | 2026-07-27 |
 
 ---
 
