@@ -37,6 +37,13 @@ export function workingDaysBefore(fromISO: string, toISO: string): number {
   return count;
 }
 
+/** Понедельник недели, в которую попадает дата. */
+export function mondayOfWeek(iso: string): string {
+  const d = parseISO(iso);
+  const dow = (d.getDay() + 6) % 7; // пн = 0
+  return formatISO(addDays(d, -dow));
+}
+
 /** Если дата выпадает на выходной, сдвигает на ближайший следующий рабочий день. */
 export function nextWorkingDay(date: Date): Date {
   let d = new Date(date);

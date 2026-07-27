@@ -1,9 +1,17 @@
 import type { AppData, Employee, Task, Stage, StageType } from '../types';
+import { addDays, formatISO, mondayOfWeek, parseISO } from '../engine/dates';
 
 // Данные плана команды на июнь 2026 — из протокола встречи по распределению задач.
 // Этапы закреплены (pinnedStartDate) на даты из протокола, длительность — в рабочих днях.
 // Роли: разработчики помечены как backend, тестировщики — qa (исходный протокол
 // не разделяет бэк/фронт и не выделяет лидов).
+//
+// Даты ниже авторированы от понедельника 2026-06-01. При создании демо
+// (`makeSampleData`) весь план перебазируется на понедельник ТЕКУЩЕЙ недели,
+// чтобы новый пользователь видел план «от сегодня», а не в прошлом. Дельта
+// кратна 7 дням (оба края — понедельники), поэтому дни недели всех этапов
+// сохраняются, а закреплённые июньские этапы не выпадают как «прошлое».
+const SAMPLE_BASE = '2026-06-01';
 
 let seq = 0;
 const uid = (prefix: string) => `${prefix}-${++seq}`;
@@ -116,11 +124,25 @@ export const sampleTasks: Task[] = [
 ];
 
 export function makeSampleData(): AppData {
+  // Понедельник текущей недели — новая база демо; сдвигаем все пины на дельту.
+  const base = mondayOfWeek(formatISO(new Date()));
+  const deltaDays = Math.round(
+    (parseISO(base).getTime() - parseISO(SAMPLE_BASE).getTime()) / 86400000,
+  );
+  const shift = (iso: string) => formatISO(addDays(parseISO(iso), deltaDays));
   return {
     teams: [{ id: TEAM_ID, name: 'Команда 1' }],
     employees: sampleEmployees,
-    tasks: sampleTasks,
-    horizonStart: '2026-06-01',
+    tasks: sampleTasks.map((t) => ({
+      ...t,
+      stages: t.stages.map((s) => ({
+        ...s,
+        pinnedStartDate: s.pinnedStartDate
+          ? shift(s.pinnedStartDate)
+          : s.pinnedStartDate,
+      })),
+    })),
+    horizonStart: base,
     horizonWeeks: 4,
   };
 }
