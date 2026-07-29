@@ -32,6 +32,7 @@ import {
 } from './storage/shareStorage';
 import { downloadMarkdown } from './export/markdownExport';
 import { downloadReleasesCsv } from './export/csvExport';
+import { track } from './analytics';
 
 function formatFull(iso: string | null): string {
   if (!iso) return '—';
@@ -177,7 +178,11 @@ export default function App() {
   useEffect(() => {
     if (!sharedId) return;
     fetchSharedPlan(sharedId)
-      .then((d) => setData(d))
+      .then((d) => {
+        setData(d);
+        // Метрика распространения: сколько людей открывает планы по ссылкам.
+        track('plan_opened_via_link');
+      })
       .catch(() => setLoadError(true))
       .finally(() => setLoading(false));
   }, [sharedId]);
@@ -241,7 +246,7 @@ export default function App() {
   // Новая задача попадает в активную команду. earliestStart = сегодня —
   // мягкая граница, чтобы задача вставала от текущего дня, а не от начала
   // горизонта (в прошлое). На старые задачи не влияет (у них поля нет).
-  const addTask = (task: Task) =>
+  const addTask = (task: Task) => {
     setData((d) => ({
       ...d,
       tasks: [
@@ -249,6 +254,13 @@ export default function App() {
         { ...task, teamId: effectiveTeamId, earliestStart: formatISO(new Date()) },
       ],
     }));
+    // Счётчики масштаба — видно, демо это или живой план.
+    track('task_created', {
+      stages: task.stages.length,
+      tasks_total: data.tasks.length + 1,
+      employees_total: data.employees.length,
+    });
+  };
 
   const updateTask = (task: Task) =>
     setData((d) => ({
@@ -264,6 +276,7 @@ export default function App() {
   const markDone = (taskId: string) => {
     pushUndo();
     setData(completeTask(data, result, taskId, formatISO(new Date())));
+    track('task_completed');
   };
 
   // Вернуть завершённую в работу (закрепления этапов остаются на месте).
@@ -411,6 +424,7 @@ export default function App() {
         ),
       })),
     }));
+    track('stage_pinned');
   };
 
   // Сняли закрепление — этап возвращается в авторазмещение.
@@ -465,7 +479,7 @@ export default function App() {
 
   // --- Управление составом ---
   // Новый сотрудник заводится в активной команде.
-  const addEmployee = (name: string, specialization: Specialization) =>
+  const addEmployee = (name: string, specialization: Specialization) => {
     setData((d) => ({
       ...d,
       employees: [
@@ -473,6 +487,8 @@ export default function App() {
         { id: newId(), name, specialization, teamId: effectiveTeamId, unavailable: [] },
       ],
     }));
+    track('employee_added');
+  };
 
   const updateEmployee = (id: string, patch: Partial<Employee>) =>
     setData((d) => ({
@@ -587,6 +603,10 @@ export default function App() {
       const id = await publishPlan(effectiveTeamId, viewData);
       const url = shareUrl(id);
       setShareLink(url);
+      track('plan_shared', {
+        tasks: viewData.tasks.length,
+        employees: viewData.employees.length,
+      });
       try {
         await navigator.clipboard?.writeText(url);
         setStatus({ text: 'Ссылка скопирована — отправьте коллегам', kind: 'ok' });
@@ -728,7 +748,10 @@ export default function App() {
               Отчёт
             </button>
             <button
-              onClick={() => downloadMarkdown(viewData, result)}
+              onClick={() => {
+                downloadMarkdown(viewData, result);
+                track('export_md');
+              }}
               className="rounded-full border border-slate-300 px-3.5 py-1.5 text-sm hover:bg-slate-100"
               title="Скачать план таблицей в markdown (.md)"
             >
@@ -914,6 +937,7 @@ export default function App() {
                     onClick={() => {
                       setShowFileMenu(false);
                       downloadMarkdown(viewData, result);
+                      track('export_md');
                       setStatus({ text: 'Выгружено в team-plan.md', kind: 'ok' });
                     }}
                     className="block w-full px-3 py-1.5 text-left hover:bg-slate-100"
@@ -1192,7 +1216,10 @@ export default function App() {
             Задачи и даты релизов
           </h2>
           <button
-            onClick={() => downloadReleasesCsv(activeReleases, viewData.tasks)}
+            onClick={() => {
+              downloadReleasesCsv(activeReleases, viewData.tasks);
+              track('export_csv');
+            }}
             disabled={activeReleases.length === 0}
             title="Скачать таблицу как CSV (для Excel); завершённые не выгружаются"
             className="rounded-full border border-slate-300 px-3.5 py-1 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-40"

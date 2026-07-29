@@ -68,6 +68,7 @@
 | CSV трудоёмкости (размер в футболках XS–XL) | ✅ | [releasenote.md](releasenote.md) (2026-07-23) | `src/engine/taskSizing.ts` · `taskSizing.test.ts` · `src/export/taskSizingCsv.ts` | 2026-07-23 |
 | Новая задача стартует от сегодня, а не от начала горизонта (`earliestStart`) | ✅ | [releasenote.md](releasenote.md) (2026-07-25) | `src/types.ts` · `src/engine/scheduler.ts` · `scheduler.test.ts` | 2026-07-25 |
 | Часы по задачам за период (дни/часы по этапам, таблица в отчёте + CSV) | ✅ | [releasenote.md](releasenote.md) (2026-07-27) | `src/engine/taskEffort.ts` · `taskEffort.test.ts` · `src/export/taskEffortCsv.ts` | 2026-07-27 |
+| Анонимная статистика использования (Umami Cloud: посещения, уники, 8 событий; прокси от адблокеров) | ✅ | [releasenote.md](releasenote.md) (2026-07-29) | `src/analytics.ts` · `index.html` · `vercel.json` (rewrites) | 2026-07-29 |
 
 ---
 

@@ -5,6 +5,22 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Планировщик ресурсов команды</title>
+    <!-- Umami Cloud: посещаемость и события. Скрипт и эндпоинт проксируются
+         через свой домен (rewrites в vercel.json), чтобы корпоративные
+         адблокеры не резали *.umami.is. Без data-host-url облачный скрипт
+         шлёт события напрямую на gateway.umami.is — поэтому хост задан явно.
+         data-domains ограничивает сбор продом — dev и превью-деплои в
+         статистику не попадают.
+         Website ID подставляется Vite на сборке из VITE_UMAMI_WEBSITE_ID
+         (Vercel env / .env.local) — в репозитории его нет. Без переменной
+         id останется пустым и трекер молча не будет отправлять события. -->
+    <script
+      defer
+      src="/rp.js"
+      data-website-id="%VITE_UMAMI_WEBSITE_ID%"
+      data-host-url="https://dist-rho-seven-68.vercel.app"
+      data-domains="dist-rho-seven-68.vercel.app"
+    ></script>
   </head>
   <body>
     <div id="root"></div>
