@@ -3,7 +3,10 @@ import type { AppData, Employee, Specialization, StageType } from '../types';
 import { SPECIALIZATION_LABELS, SPECIALIZATION_ORDER, STAGE_LABELS } from '../types';
 import type { ScheduleResult, ScheduledStage } from '../engine/scheduler';
 import { overloadedDays } from '../engine/scheduler';
+import type { PinOrderBounds } from '../engine/pinOrder';
+import { pinOrderBounds } from '../engine/pinOrder';
 import {
+  addWorkingDays,
   parseISO,
   formatISO,
   shortLabel,
@@ -56,6 +59,18 @@ interface RowLayout {
 
 const DRAG_KEY = 'text/plain';
 
+/** Что тащим: тип этапа (для проверки ролей), текущий исполнитель — его
+    строка принимает этап всегда, даже если по ролям он этап вести «не может»
+    (иначе этап, назначенный вопреки ролям, было бы не сдвинуть по датам),
+    длительность (не подсвечивать дни, где блок лёг бы на отпуск) и границы
+    по порядку этапов задачи (ревью не раньше конца разработки). */
+interface DragInfo {
+  type: StageType;
+  assigneeId: string | null;
+  durationDays: number;
+  bounds: PinOrderBounds;
+}
+
 export function GanttChart({
   data,
   result,
@@ -65,15 +80,7 @@ export function GanttChart({
   onUnpinStage,
   onEditTask,
 }: Props) {
-  // Что тащим: тип этапа (для проверки ролей), текущий исполнитель — его
-  // строка принимает этап всегда, даже если по ролям он этап вести «не может»
-  // (иначе этап, назначенный вопреки ролям, было бы не сдвинуть по датам) —
-  // и длительность, чтобы не подсвечивать дни, где блок лёг бы на отпуск.
-  const [dragging, setDragging] = useState<{
-    type: StageType;
-    assigneeId: string | null;
-    durationDays: number;
-  } | null>(null);
+  const [dragging, setDragging] = useState<DragInfo | null>(null);
   // Выбранная задача: подсвечиваем все её этапы (архитектура/разработка/ревью/QA),
   // остальные блоки притеняем. Клик по тому же этапу или по фону — снять выбор.
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
@@ -144,6 +151,15 @@ export function GanttChart({
       for (const st of t.stages) m.set(st.id, st.durationDays);
     return m;
   }, [data.tasks]);
+
+  // Границы закрепления по порядку этапов задачи — чтобы при перетаскивании
+  // не подсвечивать дни, где этап встал бы раньше конца предыдущего.
+  const orderBoundsById = useMemo(() => {
+    const m = new Map<string, PinOrderBounds>();
+    for (const t of data.tasks)
+      for (const st of t.stages) m.set(st.id, pinOrderBounds(t, st.id, result));
+    return m;
+  }, [data.tasks, result]);
 
   // Дни релизов по задачам -> индекс в видимой сетке (в один день могут попасть
   // несколько задач — показываем один флажок со счётчиком). Релизы за правым
@@ -251,6 +267,7 @@ export function GanttChart({
                   layout={layoutRow(emp.id, days.length, result, stageById)}
                   pinnedStartById={pinnedStartById}
                   durationById={durationById}
+                  orderBoundsById={orderBoundsById}
                   dragging={dragging}
                   setDragging={setDragging}
                   selectedTaskId={selectedTaskId}
@@ -457,6 +474,7 @@ function EmployeeRow({
   layout,
   pinnedStartById,
   durationById,
+  orderBoundsById,
   dragging,
   setDragging,
   selectedTaskId,
@@ -472,18 +490,10 @@ function EmployeeRow({
   pinnedStartById: Map<string, string>;
   /** stageId -> полная длительность этапа в рабочих днях. */
   durationById: Map<string, number>;
-  dragging: {
-    type: StageType;
-    assigneeId: string | null;
-    durationDays: number;
-  } | null;
-  setDragging: (
-    d: {
-      type: StageType;
-      assigneeId: string | null;
-      durationDays: number;
-    } | null,
-  ) => void;
+  /** stageId -> границы закрепления по порядку этапов задачи. */
+  orderBoundsById: Map<string, PinOrderBounds>;
+  dragging: DragInfo | null;
+  setDragging: (d: DragInfo | null) => void;
   selectedTaskId: string | null;
   setSelectedTaskId: (id: string | null) => void;
   onMoveStage: (stageId: string, employeeId: string, isoDate: string) => void;
@@ -499,12 +509,21 @@ function EmployeeRow({
     (stageAllows(dragging.type, emp) || dragging.assigneeId === emp.id);
 
   // Можно ли бросить на день `i`: блок этапа (i .. i+длительность-1) не должен
-  // задевать отпуск/больничный. Дни за видимой сеткой перепроверяет moveStage
-  // по реальным датам недоступности.
+  // задевать отпуск/больничный и ломать порядок этапов задачи (не раньше конца
+  // предыдущего, не позже следующего закреплённого). Дни за видимой сеткой
+  // перепроверяет moveStage по реальным датам.
   const canDropAt = (i: number) => {
     if (!droppable || dragging === null) return false;
     for (let d = i; d < i + dragging.durationDays; d++) {
       if (unavailable.titles.has(d)) return false;
+    }
+    const { minStart, nextPinnedStart } = dragging.bounds;
+    if (minStart && days[i] < minStart) return false;
+    if (
+      nextPinnedStart &&
+      addWorkingDays(days[i], dragging.durationDays - 1) >= nextPinnedStart
+    ) {
+      return false;
     }
     return true;
   };
@@ -609,6 +628,10 @@ function EmployeeRow({
                   type: s.type,
                   assigneeId: s.assigneeId,
                   durationDays: durationById.get(s.stageId) ?? 1,
+                  bounds: orderBoundsById.get(s.stageId) ?? {
+                    minStart: null,
+                    nextPinnedStart: null,
+                  },
                 });
               }}
               onDragEnd={() => setDragging(null)}

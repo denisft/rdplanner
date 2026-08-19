@@ -243,6 +243,14 @@ export function schedule(data: AppData): ScheduleResult {
         startIndex = pin.start;
         isPinned = true;
         isClipped = pin.clipped;
+        // Пин не двигаем, но нарушение последовательности честно показываем:
+        // drag&drop такое не даёт создать, однако сюда можно попасть иначе —
+        // например, увеличив длительность предыдущего этапа в форме задачи.
+        if (!done && startIndex <= prevEnd) {
+          warnings.push(
+            `Этап «${stage.type}» задачи «${task.name}» закреплён раньше окончания предыдущего этапа — порядок этапов нарушен.`,
+          );
+        }
       } else if (stage.assigneeId) {
         const busy = ensureBusy(stage.assigneeId);
         const unavailable =

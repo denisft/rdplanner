@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { AppData, Employee, Specialization, Task, Team } from './types';
 import { schedule, stageOverlapsUnavailable } from './engine/scheduler';
+import { pinRespectsOrder } from './engine/pinOrder';
 import { teamView } from './engine/teams';
 import { completeTask, reopenTask } from './engine/complete';
 import { shiftHorizonStart, shiftTarget } from './engine/horizon';
@@ -403,15 +404,16 @@ export default function App() {
   }, [ganttFull, showForm, editingTask, showTeam, showReport, showUrgent]);
 
   // Перетащили этап на сотрудника и день — закрепляем вручную.
-  // Бросок, при котором блок этапа лёг бы на отпуск/больничный исполнителя,
+  // Бросок, при котором блок этапа лёг бы на отпуск/больничный исполнителя
+  // или сломал порядок этапов задачи (ревью раньше конца разработки),
   // молча отклоняется (гант такие цели и не подсвечивает — это второй рубеж).
   const moveStage = (stageId: string, employeeId: string, isoDate: string) => {
     const emp = data.employees.find((e) => e.id === employeeId);
-    const stage = data.tasks
-      .flatMap((t) => t.stages)
-      .find((s) => s.id === stageId);
-    if (!emp || !stage) return;
+    const task = data.tasks.find((t) => t.stages.some((s) => s.id === stageId));
+    const stage = task?.stages.find((s) => s.id === stageId);
+    if (!emp || !task || !stage) return;
     if (stageOverlapsUnavailable(emp, isoDate, stage.durationDays)) return;
+    if (!pinRespectsOrder(task, stageId, isoDate, result)) return;
     pushUndo();
     setData((d) => ({
       ...d,

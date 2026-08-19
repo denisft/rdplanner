@@ -599,6 +599,90 @@ describe('schedule', () => {
     expect(s.startIndex).toBe(2); // обтекает занятые 0–1
   });
 
+  it('пин раньше конца предыдущего этапа даёт предупреждение о порядке', () => {
+    const data = base(
+      [
+        {
+          id: 't1',
+          name: 'Broken',
+          priority: 1,
+          stages: [
+            // Разработка авторазмещается на пн–ср (индексы 0-2).
+            { id: 'dev', type: 'development', durationDays: 3, assigneeId: 'dev' },
+            {
+              id: 'rev',
+              type: 'review',
+              durationDays: 1,
+              assigneeId: 'lead',
+              pinnedStartDate: '2026-06-02', // внутри разработки
+            },
+          ],
+        },
+      ],
+      [emp('dev'), emp('lead')],
+    );
+    const r = schedule(data);
+    expect(r.warnings.some((w) => w.includes('порядок этапов'))).toBe(true);
+    // Пин при этом не двигается — стоит куда закрепили.
+    expect(r.scheduledStages.find((s) => s.stageId === 'rev')!.startIndex).toBe(1);
+  });
+
+  it('пин после конца предыдущего этапа предупреждения не даёт', () => {
+    const data = base(
+      [
+        {
+          id: 't1',
+          name: 'Ok',
+          priority: 1,
+          stages: [
+            { id: 'dev', type: 'development', durationDays: 3, assigneeId: 'dev' },
+            {
+              id: 'rev',
+              type: 'review',
+              durationDays: 1,
+              assigneeId: 'lead',
+              pinnedStartDate: '2026-06-04', // день после конца разработки
+            },
+          ],
+        },
+      ],
+      [emp('dev'), emp('lead')],
+    );
+    expect(schedule(data).warnings).toHaveLength(0);
+  });
+
+  it('нарушенный порядок пинов завершённой задачи не тревожит', () => {
+    const data = base(
+      [
+        {
+          id: 'done',
+          name: 'Done',
+          priority: 1,
+          done: true,
+          completedAt: '2026-06-05',
+          stages: [
+            {
+              id: 'dev',
+              type: 'development',
+              durationDays: 2,
+              assigneeId: 'dev',
+              pinnedStartDate: '2026-06-03',
+            },
+            {
+              id: 'rev',
+              type: 'review',
+              durationDays: 1,
+              assigneeId: 'lead',
+              pinnedStartDate: '2026-06-01', // раньше разработки, но история заморожена
+            },
+          ],
+        },
+      ],
+      [emp('dev'), emp('lead')],
+    );
+    expect(schedule(data).warnings).toHaveLength(0);
+  });
+
   it('считает дату релиза по последнему этапу', () => {
     const data = base(
       [
