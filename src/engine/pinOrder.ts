@@ -2,11 +2,16 @@
 //
 // Движок ставит закреплённый этап «ровно туда, куда бросили» и порядок не чинит —
 // поэтому некорректное закрепление (ревью раньше конца разработки) надо не
-// допускать на входе. Здесь считаются границы, в которых этап можно закрепить:
-//  - снизу: все предыдущие этапы задачи должны закончиться до старта пина
-//    (их текущие расчётные даты — авторазмещаемые соседи от пина не двигаются);
-//  - сверху: конец пина должен быть раньше старта ближайшего следующего
-//    ЗАКРЕПЛЁННОГО этапа (незакреплённые следующие перетекут вправо сами).
+// допускать на входе. Ограничение только снизу: все предыдущие этапы задачи
+// должны закончиться до старта пина (их текущие расчётные даты — авторазмещаемые
+// соседи от пина не двигаются).
+//
+// Сверху НЕ ограничиваем сознательно: сдвиг этапа вправо поверх следующего
+// закреплённого — обычный сценарий «задача едет позже», следующие пины
+// пользователь перетащит следом. Иначе план, где все этапы закреплены впритык
+// (демо, любой план после ручной раскладки), замораживается целиком: у ранних
+// этапов не остаётся ни одного допустимого дня. Возникшее нарушение порядка
+// показывает предупреждение движка (см. schedule).
 
 import type { Stage, Task } from '../types';
 import type { ScheduleResult } from './scheduler';
@@ -15,9 +20,6 @@ import { addWorkingDays } from './dates';
 export interface PinOrderBounds {
   /** Самый ранний допустимый день старта (null — снизу не ограничен). */
   minStart: string | null;
-  /** Старт ближайшего следующего закреплённого этапа: конец блока должен быть
-      строго раньше этой даты (null — сверху не ограничен). */
-  nextPinnedStart: string | null;
 }
 
 /** Текущая расчётная дата окончания этапа; null — этап не размещён. */
@@ -41,7 +43,7 @@ export function pinOrderBounds(
   result: ScheduleResult,
 ): PinOrderBounds {
   const idx = task.stages.findIndex((s) => s.id === stageId);
-  if (idx === -1) return { minStart: null, nextPinnedStart: null };
+  if (idx === -1) return { minStart: null };
 
   // Максимум по всем предыдущим (а не только соседнему): границы честные,
   // даже если порядок в данных уже нарушен.
@@ -53,14 +55,7 @@ export function pinOrderBounds(
     if (!minStart || dayAfter > minStart) minStart = dayAfter;
   }
 
-  let nextPinnedStart: string | null = null;
-  for (let i = idx + 1; i < task.stages.length; i++) {
-    const pin = task.stages[i].pinnedStartDate;
-    if (!pin) continue;
-    if (!nextPinnedStart || pin < nextPinnedStart) nextPinnedStart = pin;
-  }
-
-  return { minStart, nextPinnedStart };
+  return { minStart };
 }
 
 /** Не нарушит ли закрепление этапа на дату startISO порядок этапов задачи. */
@@ -70,13 +65,6 @@ export function pinRespectsOrder(
   startISO: string,
   result: ScheduleResult,
 ): boolean {
-  const stage = task.stages.find((s) => s.id === stageId);
-  if (!stage) return true;
-  const { minStart, nextPinnedStart } = pinOrderBounds(task, stageId, result);
-  if (minStart && startISO < minStart) return false;
-  if (nextPinnedStart) {
-    const endISO = addWorkingDays(startISO, stage.durationDays - 1);
-    if (endISO >= nextPinnedStart) return false;
-  }
-  return true;
+  const { minStart } = pinOrderBounds(task, stageId, result);
+  return !minStart || startISO >= minStart;
 }

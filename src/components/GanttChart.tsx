@@ -6,7 +6,6 @@ import { overloadedDays } from '../engine/scheduler';
 import type { PinOrderBounds } from '../engine/pinOrder';
 import { pinOrderBounds } from '../engine/pinOrder';
 import {
-  addWorkingDays,
   parseISO,
   formatISO,
   shortLabel,
@@ -510,21 +509,15 @@ function EmployeeRow({
 
   // Можно ли бросить на день `i`: блок этапа (i .. i+длительность-1) не должен
   // задевать отпуск/больничный и ломать порядок этапов задачи (не раньше конца
-  // предыдущего, не позже следующего закреплённого). Дни за видимой сеткой
-  // перепроверяет moveStage по реальным датам.
+  // предыдущего; наезд на следующий закреплённый не блокируем — см. pinOrder).
+  // Дни за видимой сеткой перепроверяет moveStage по реальным датам.
   const canDropAt = (i: number) => {
     if (!droppable || dragging === null) return false;
     for (let d = i; d < i + dragging.durationDays; d++) {
       if (unavailable.titles.has(d)) return false;
     }
-    const { minStart, nextPinnedStart } = dragging.bounds;
+    const { minStart } = dragging.bounds;
     if (minStart && days[i] < minStart) return false;
-    if (
-      nextPinnedStart &&
-      addWorkingDays(days[i], dragging.durationDays - 1) >= nextPinnedStart
-    ) {
-      return false;
-    }
     return true;
   };
 
@@ -628,10 +621,7 @@ function EmployeeRow({
                   type: s.type,
                   assigneeId: s.assigneeId,
                   durationDays: durationById.get(s.stageId) ?? 1,
-                  bounds: orderBoundsById.get(s.stageId) ?? {
-                    minStart: null,
-                    nextPinnedStart: null,
-                  },
+                  bounds: orderBoundsById.get(s.stageId) ?? { minStart: null },
                 });
               }}
               onDragEnd={() => setDragging(null)}
