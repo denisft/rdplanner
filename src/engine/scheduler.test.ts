@@ -740,3 +740,326 @@ describe('stageOverlapsUnavailable', () => {
     expect(stageOverlapsUnavailable(weekender, '2026-06-05', 2)).toBe(false);
   });
 });
+
+// Объяснимость размещения (БЛ-1): движок отдаёт причины вместе с расписанием.
+describe('schedule: reasons — почему этап здесь', () => {
+  it('ничто не мешало — факторов нет, старт в первый день горизонта', () => {
+    const data = base(
+      [
+        {
+          id: 't1',
+          name: 'A',
+          priority: 1,
+          stages: [{ id: 's1', type: 'development', durationDays: 2, assigneeId: 'dev' }],
+        },
+      ],
+      [emp('dev')],
+    );
+    const p = schedule(data).reasons.get('s1')!;
+    expect(p.startDate).toBe('2026-06-01');
+    expect(p.factors).toEqual([]);
+    expect(p.conflicts).toEqual([]);
+  });
+
+  it('предыдущий этап задачи — фактор prevStage с датой окончания', () => {
+    const data = base(
+      [
+        {
+          id: 't1',
+          name: 'A',
+          priority: 1,
+          stages: [
+            { id: 's1', type: 'architecture', durationDays: 2, assigneeId: 'lead' },
+            { id: 's2', type: 'development', durationDays: 2, assigneeId: 'dev' },
+          ],
+        },
+      ],
+      [emp('lead'), emp('dev')],
+    );
+    const p = schedule(data).reasons.get('s2')!;
+    expect(p.startDate).toBe('2026-06-03');
+    expect(p.factors).toEqual([
+      { kind: 'prevStage', stageId: 's1', stageType: 'architecture', endDate: '2026-06-02' },
+    ]);
+  });
+
+  it('слот перехватила более приоритетная задача — фактор busy с её именем и датами', () => {
+    const data = base(
+      [
+        {
+          id: 't1',
+          name: 'Важная',
+          priority: 1,
+          stages: [{ id: 's1', type: 'development', durationDays: 3, assigneeId: 'dev' }],
+        },
+        {
+          id: 't2',
+          name: 'Вторая',
+          priority: 2,
+          stages: [{ id: 's2', type: 'development', durationDays: 2, assigneeId: 'dev' }],
+        },
+      ],
+      [emp('dev')],
+    );
+    const p = schedule(data).reasons.get('s2')!;
+    expect(p.startDate).toBe('2026-06-04');
+    expect(p.factors).toEqual([
+      {
+        kind: 'busy',
+        stageId: 's1',
+        taskId: 't1',
+        taskName: 'Важная',
+        stageType: 'development',
+        pinned: false,
+        from: '2026-06-01',
+        to: '2026-06-03',
+      },
+    ]);
+  });
+
+  it('отпуск исполнителя — фактор unavailable с диапазоном', () => {
+    const vacationer: Employee = {
+      id: 'dev',
+      name: 'dev',
+      specialization: 'backend',
+      unavailable: [{ from: '2026-06-01', to: '2026-06-02' }],
+    };
+    const data = base(
+      [
+        {
+          id: 't1',
+          name: 'A',
+          priority: 1,
+          stages: [{ id: 's1', type: 'development', durationDays: 2, assigneeId: 'dev' }],
+        },
+      ],
+      [vacationer],
+    );
+    const p = schedule(data).reasons.get('s1')!;
+    expect(p.startDate).toBe('2026-06-03');
+    expect(p.factors).toEqual([
+      { kind: 'unavailable', from: '2026-06-01', to: '2026-06-02' },
+    ]);
+  });
+
+  it('обтекание закреплённого этапа: busy с pinned=true плюс короткое окно', () => {
+    const data = base(
+      [
+        {
+          id: 't1',
+          name: 'Закреплённая',
+          priority: 1,
+          stages: [
+            {
+              id: 's1',
+              type: 'development',
+              durationDays: 1,
+              assigneeId: 'dev',
+              pinnedStartDate: '2026-06-03',
+            },
+          ],
+        },
+        {
+          id: 't2',
+          name: 'Авто',
+          priority: 2,
+          stages: [{ id: 's2', type: 'development', durationDays: 3, assigneeId: 'dev' }],
+        },
+      ],
+      [emp('dev')],
+    );
+    const p = schedule(data).reasons.get('s2')!;
+    // пн–вт свободны, но этап трёхдневный: встаёт после закреплённой среды
+    expect(p.startDate).toBe('2026-06-04');
+    expect(p.factors).toEqual([
+      {
+        kind: 'busy',
+        stageId: 's1',
+        taskId: 't1',
+        taskName: 'Закреплённая',
+        stageType: 'development',
+        pinned: true,
+        from: '2026-06-03',
+        to: '2026-06-03',
+      },
+      { kind: 'shortGap', freeDays: 2, neededDays: 3 },
+    ]);
+  });
+
+  it('сам этап закреплён — фактор manualPin с датой закрепления', () => {
+    const data = base(
+      [
+        {
+          id: 't1',
+          name: 'A',
+          priority: 1,
+          stages: [
+            {
+              id: 's1',
+              type: 'development',
+              durationDays: 2,
+              assigneeId: 'dev',
+              pinnedStartDate: '2026-06-04',
+            },
+          ],
+        },
+      ],
+      [emp('dev')],
+    );
+    const p = schedule(data).reasons.get('s1')!;
+    expect(p.startDate).toBe('2026-06-04');
+    expect(p.factors).toEqual([{ kind: 'manualPin', date: '2026-06-04' }]);
+  });
+
+  it('этап без исполнителя — фактор noAssignee', () => {
+    const data = base(
+      [
+        {
+          id: 't1',
+          name: 'A',
+          priority: 1,
+          stages: [{ id: 's1', type: 'development', durationDays: 2, assigneeId: null }],
+        },
+      ],
+      [emp('dev')],
+    );
+    const p = schedule(data).reasons.get('s1')!;
+    expect(p.factors).toEqual([{ kind: 'noAssignee' }]);
+  });
+
+  it('мягкая граница старта задачи — фактор earliestStart', () => {
+    const data = base(
+      [
+        {
+          id: 't1',
+          name: 'A',
+          priority: 1,
+          earliestStart: '2026-06-03',
+          stages: [{ id: 's1', type: 'development', durationDays: 2, assigneeId: 'dev' }],
+        },
+      ],
+      [emp('dev')],
+    );
+    const p = schedule(data).reasons.get('s1')!;
+    expect(p.startDate).toBe('2026-06-03');
+    expect(p.factors).toEqual([{ kind: 'earliestStart', date: '2026-06-03' }]);
+  });
+
+  it('наложение закреплённых этапов — conflicts у обоих, с датами пересечения', () => {
+    const data = base(
+      [
+        {
+          id: 't1',
+          name: 'A',
+          priority: 1,
+          stages: [
+            {
+              id: 's1',
+              type: 'development',
+              durationDays: 3,
+              assigneeId: 'dev',
+              pinnedStartDate: '2026-06-01',
+            },
+          ],
+        },
+        {
+          id: 't2',
+          name: 'B',
+          priority: 2,
+          stages: [
+            {
+              id: 's2',
+              type: 'development',
+              durationDays: 3,
+              assigneeId: 'dev',
+              pinnedStartDate: '2026-06-03',
+            },
+          ],
+        },
+      ],
+      [emp('dev')],
+    );
+    const r = schedule(data);
+    // ср 03.06 — единственный общий день
+    expect(r.reasons.get('s1')!.conflicts).toEqual([
+      {
+        stageId: 's2',
+        taskId: 't2',
+        taskName: 'B',
+        stageType: 'development',
+        pinned: true,
+        from: '2026-06-03',
+        to: '2026-06-03',
+      },
+    ]);
+    expect(r.reasons.get('s2')!.conflicts.map((c) => c.stageId)).toEqual(['s1']);
+  });
+
+  it('объяснение меняется согласованно с расписанием: добавили отпуск — сдвиг и новая причина', () => {
+    const before = base(
+      [
+        {
+          id: 't1',
+          name: 'A',
+          priority: 1,
+          stages: [{ id: 's1', type: 'development', durationDays: 2, assigneeId: 'dev' }],
+        },
+      ],
+      [emp('dev')],
+    );
+    const p1 = schedule(before).reasons.get('s1')!;
+    expect(p1.startDate).toBe('2026-06-01');
+    expect(p1.factors).toEqual([]);
+
+    const after = {
+      ...before,
+      employees: [
+        {
+          ...before.employees[0],
+          unavailable: [{ from: '2026-06-01', to: '2026-06-03' }],
+        },
+      ],
+    };
+    const r2 = schedule(after);
+    const p2 = r2.reasons.get('s1')!;
+    const stage = r2.scheduledStages.find((s) => s.stageId === 's1')!;
+    // причина и факт совпадают: старт объяснения = старт в сетке
+    expect(p2.startDate).toBe(r2.days[stage.startIndex]);
+    expect(p2.startDate).toBe('2026-06-04');
+    expect(p2.factors).toEqual([
+      { kind: 'unavailable', from: '2026-06-01', to: '2026-06-03' },
+    ]);
+  });
+
+  it('у каждого этапа плана есть объяснение — без заглушек', () => {
+    const data = base(
+      [
+        {
+          id: 't1',
+          name: 'A',
+          priority: 1,
+          stages: [
+            { id: 's1', type: 'architecture', durationDays: 1, assigneeId: 'lead' },
+            { id: 's2', type: 'development', durationDays: 2, assigneeId: 'dev' },
+            { id: 's3', type: 'review', durationDays: 1, assigneeId: 'lead' },
+          ],
+        },
+        {
+          id: 't2',
+          name: 'B',
+          priority: 2,
+          stages: [
+            { id: 's4', type: 'development', durationDays: 2, assigneeId: 'dev' },
+            { id: 's5', type: 'qa', durationDays: 1, assigneeId: null },
+          ],
+        },
+      ],
+      [emp('lead'), emp('dev')],
+    );
+    const r = schedule(data);
+    for (const s of r.scheduledStages) {
+      expect(r.reasons.has(s.stageId)).toBe(true);
+    }
+    expect(r.reasons.size).toBe(5);
+  });
+});

@@ -1,8 +1,13 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { AppData, Employee, Specialization, StageType } from '../types';
 import { SPECIALIZATION_LABELS, SPECIALIZATION_ORDER, STAGE_LABELS } from '../types';
-import type { ScheduleResult, ScheduledStage } from '../engine/scheduler';
+import type {
+  ScheduleResult,
+  ScheduledStage,
+  StagePlacement,
+} from '../engine/scheduler';
 import { overloadedDays } from '../engine/scheduler';
+import { explainPlacement, rangeLabel } from '../engine/explain';
 import type { PinOrderBounds } from '../engine/pinOrder';
 import { pinOrderBounds } from '../engine/pinOrder';
 import {
@@ -52,11 +57,20 @@ interface RowLayout {
   busyDays: number;
   /** Видимых дней с наложением (>1 этап). */
   overloadDays: number;
-  /** stageId -> подписи задач, с которыми этап наложился. */
-  conflictNames: Map<string, string[]>;
 }
 
 const DRAG_KEY = 'text/plain';
+
+/** Задержка перед карточкой «почему этап здесь», мс: беглое движение мышью
+    по ганту не должно вызывать мельтешение поповеров. */
+const EXPLAIN_DELAY = 350;
+
+/** Наведённый блок: что объясняем и где стоял блок в момент наведения. */
+interface HoverInfo {
+  stageId: string;
+  employeeId: string;
+  anchor: DOMRect;
+}
 
 /** Что тащим: тип этапа (для проверки ролей), текущий исполнитель — его
     строка принимает этап всегда, даже если по ролям он этап вести «не может»
@@ -85,6 +99,30 @@ export function GanttChart({
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   // Скролл-контейнер — для автопрокрутки к «сегодня» и кнопки «сегодня».
   const scrollRef = useRef<HTMLDivElement>(null);
+  // Объяснение размещения (БЛ-1): карточка по наведению на блок, с задержкой.
+  const [hovered, setHovered] = useState<HoverInfo | null>(null);
+  const hoverTimer = useRef<number | null>(null);
+  const cancelHoverTimer = () => {
+    if (hoverTimer.current !== null) {
+      clearTimeout(hoverTimer.current);
+      hoverTimer.current = null;
+    }
+  };
+  const openExplain = (stageId: string, employeeId: string, el: HTMLElement) => {
+    cancelHoverTimer();
+    // Позицию блока фиксируем сразу: карточка позиционируется относительно
+    // окна (position: fixed), иначе её обрезал бы скролл ганта.
+    const anchor = el.getBoundingClientRect();
+    hoverTimer.current = window.setTimeout(
+      () => setHovered({ stageId, employeeId, anchor }),
+      EXPLAIN_DELAY,
+    );
+  };
+  const closeExplain = () => {
+    cancelHoverTimer();
+    setHovered(null);
+  };
+  useEffect(() => cancelHoverTimer, []);
 
   const visibleDays = data.horizonWeeks * 5;
   const days = result.days.slice(0, visibleDays);
@@ -185,6 +223,10 @@ export function GanttChart({
   return (
     <div
       ref={scrollRef}
+      // Карточка объяснения приколота к окну, а не к сетке: при прокрутке и
+      // уходе мыши с ганта её проще убрать, чем пересчитывать позицию.
+      onScroll={closeExplain}
+      onMouseLeave={closeExplain}
       className={`rounded-xl bg-white shadow-card ${
         fillHeight ? 'h-full overflow-auto' : 'overflow-x-auto'
       }`}
@@ -263,8 +305,7 @@ export function GanttChart({
                   key={emp.id}
                   emp={emp}
                   days={days}
-                  layout={layoutRow(emp.id, days.length, result, stageById)}
-                  pinnedStartById={pinnedStartById}
+                  layout={layoutRow(emp.id, days.length, result)}
                   durationById={durationById}
                   orderBoundsById={orderBoundsById}
                   dragging={dragging}
@@ -274,6 +315,8 @@ export function GanttChart({
                   onMoveStage={onMoveStage}
                   onUnpinStage={onUnpinStage}
                   onEditTask={onEditTask}
+                  onExplain={openExplain}
+                  onExplainEnd={closeExplain}
                 />
               ))}
             </div>
@@ -351,6 +394,161 @@ export function GanttChart({
           )}
         </div>
       </div>
+
+      {/* Объяснение размещения наведённого этапа. */}
+      {hovered && stageById.has(hovered.stageId) && (
+        <StageExplainCard
+          stage={stageById.get(hovered.stageId)!}
+          placement={result.reasons.get(hovered.stageId)}
+          employeeName={
+            data.employees.find((e) => e.id === hovered.employeeId)?.name
+          }
+          durationDays={durationById.get(hovered.stageId) ?? 0}
+          realStart={pinnedStartById.get(hovered.stageId)}
+          days={result.days}
+          anchor={hovered.anchor}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Карточка «почему этап здесь»: факты о блоке плюс объяснение из движка.
+ * Приколота к окну (position: fixed) — так её не режет скролл ганта; мышь
+ * не перехватывает, чтобы не мешать перетаскиванию.
+ */
+function StageExplainCard({
+  stage,
+  placement,
+  employeeName,
+  durationDays,
+  realStart,
+  days,
+  anchor,
+}: {
+  stage: ScheduledStage;
+  placement: StagePlacement | undefined;
+  employeeName?: string;
+  durationDays: number;
+  /** Дата ручного закрепления — настоящий старт обрезанного блока. */
+  realStart?: string;
+  /** Полная расчётная сетка дней (не только видимая). */
+  days: string[];
+  anchor: DOMRect;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  // Первый кадр рисуем невидимым, чтобы измерить карточку и решить,
+  // показывать её под блоком или над ним (у нижних строк места нет).
+  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const { width, height } = el.getBoundingClientRect();
+    const margin = 8;
+    let left = Math.max(margin, anchor.left);
+    if (left + width > window.innerWidth - margin) {
+      left = Math.max(margin, window.innerWidth - width - margin);
+    }
+    let top = anchor.bottom + 6;
+    if (top + height > window.innerHeight - margin) {
+      top = Math.max(margin, anchor.top - height - 6);
+    }
+    setPos({ left, top });
+  }, [anchor]);
+
+  const explanation = explainPlacement(placement, employeeName);
+  // У обрезанного блока видимый старт — край сетки, а не настоящая дата.
+  const start =
+    stage.clippedStart && realStart
+      ? realStart
+      : stage.startIndex >= 0
+        ? days[stage.startIndex]
+        : null;
+  const end =
+    stage.endIndex >= 0 ? days[Math.min(stage.endIndex, days.length - 1)] : null;
+
+  return (
+    <div
+      ref={ref}
+      style={{
+        left: pos?.left ?? anchor.left,
+        top: pos?.top ?? anchor.bottom + 6,
+        visibility: pos ? 'visible' : 'hidden',
+      }}
+      className="pointer-events-none fixed z-50 w-72 rounded-lg border border-slate-200 bg-white p-2.5 text-[11px] leading-snug text-slate-600 shadow-lg"
+    >
+      <div className="font-semibold text-slate-800">
+        {stage.taskName} · {STAGE_LABELS[stage.type]}
+      </div>
+      <div className="mt-0.5 text-slate-500">
+        {employeeName ?? 'без исполнителя'}
+        {start && end ? ` · ${rangeLabel(start, end)}` : ''}
+        {durationDays > 0 ? ` · ${durationDays} дн` : ''}
+      </div>
+      {(stage.done || stage.pinned || stage.clippedStart) && (
+        <div className="mt-1 flex flex-wrap gap-1">
+          {stage.done && (
+            <span className="rounded bg-slate-100 px-1 py-px text-slate-500">
+              ✓ завершена
+            </span>
+          )}
+          {stage.pinned && !stage.done && (
+            <span className="rounded bg-slate-100 px-1 py-px text-slate-500">
+              закреплён вручную
+            </span>
+          )}
+          {stage.clippedStart && (
+            <span className="rounded bg-slate-100 px-1 py-px text-slate-500">
+              начат до горизонта
+            </span>
+          )}
+        </div>
+      )}
+
+      <div className="mt-2 border-t border-slate-100 pt-1.5">
+        <div className="text-[9px] font-semibold uppercase tracking-wide text-slate-400">
+          Почему здесь
+        </div>
+        <div className="mt-0.5 text-slate-700">{explanation.headline}</div>
+        {explanation.lines.length > 0 && (
+          <ul className="mt-1 space-y-0.5">
+            {explanation.lines.map((line, i) => (
+              <li key={i} className="flex gap-1">
+                <span className="text-slate-300">•</span>
+                <span>{line}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      {explanation.conflicts.length > 0 && (
+        <div className="mt-2 border-t border-slate-100 pt-1.5">
+          <div className="text-[9px] font-semibold uppercase tracking-wide text-rose-500">
+            Наложение
+          </div>
+          <div className="mt-0.5 text-rose-700">
+            {employeeName ?? 'Исполнитель'} в эти дни ведёт ещё:
+          </div>
+          <ul className="mt-1 space-y-0.5 text-rose-700">
+            {explanation.conflicts.map((line, i) => (
+              <li key={i} className="flex gap-1">
+                <span className="text-rose-300">•</span>
+                <span>{line}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <div className="mt-2 border-t border-slate-100 pt-1.5 text-[10px] text-slate-400">
+        {stage.done
+          ? 'Alt+двойной клик — редактировать задачу'
+          : stage.pinned
+            ? 'Перетащить — сдвинуть · двойной клик — открепить · Alt+двойной клик — редактировать'
+            : 'Перетащить — закрепить на дате · Alt+двойной клик — редактировать'}
+      </div>
     </div>
   );
 }
@@ -364,7 +562,6 @@ function layoutRow(
   empId: string,
   visibleCount: number,
   result: ScheduleResult,
-  stageById: Map<string, ScheduledStage>,
 ): RowLayout {
   const stages = result.scheduledStages
     .filter(
@@ -403,26 +600,9 @@ function layoutRow(
     else conflicts.push({ from: idx, to: idx });
   }
 
-  // Кто с кем наложился — для подсказок на блоках.
-  const conflictNames = new Map<string, Set<string>>();
+  // Кто с кем наложился — считает движок (result.reasons), карточка объяснения
+  // берёт это оттуда вместе с датами пересечения.
   const occ = result.occupancy.get(empId);
-  if (occ) {
-    for (const [idx, list] of occ) {
-      if (idx >= visibleCount || list.length < 2) continue;
-      for (const id of list) {
-        let set = conflictNames.get(id);
-        if (!set) {
-          set = new Set();
-          conflictNames.set(id, set);
-        }
-        for (const other of list) {
-          if (other === id) continue;
-          const os = stageById.get(other);
-          if (os) set.add(`${os.taskName} · ${STAGE_LABELS[os.type]}`);
-        }
-      }
-    }
-  }
 
   let busyDays = 0;
   if (occ) {
@@ -435,9 +615,6 @@ function layoutRow(
     conflicts,
     busyDays,
     overloadDays: overloaded.length,
-    conflictNames: new Map(
-      [...conflictNames.entries()].map(([id, set]) => [id, [...set]]),
-    ),
   };
 }
 
@@ -471,7 +648,6 @@ function EmployeeRow({
   emp,
   days,
   layout,
-  pinnedStartById,
   durationById,
   orderBoundsById,
   dragging,
@@ -481,12 +657,12 @@ function EmployeeRow({
   onMoveStage,
   onUnpinStage,
   onEditTask,
+  onExplain,
+  onExplainEnd,
 }: {
   emp: Employee;
   days: string[];
   layout: RowLayout;
-  /** stageId -> реальная дата закреплённого старта (для обрезанных блоков). */
-  pinnedStartById: Map<string, string>;
   /** stageId -> полная длительность этапа в рабочих днях. */
   durationById: Map<string, number>;
   /** stageId -> границы закрепления по порядку этапов задачи. */
@@ -498,6 +674,10 @@ function EmployeeRow({
   onMoveStage: (stageId: string, employeeId: string, isoDate: string) => void;
   onUnpinStage: (stageId: string) => void;
   onEditTask: (taskId: string) => void;
+  /** Показать карточку «почему этап здесь» (с задержкой). */
+  onExplain: (stageId: string, employeeId: string, el: HTMLElement) => void;
+  /** Убрать карточку. */
+  onExplainEnd: () => void;
 }) {
   const rowH = layout.laneCount * LANE_H;
   const unavailable = unavailableLayout(emp, days);
@@ -601,7 +781,6 @@ function EmployeeRow({
 
         {/* Блоки этапов: каждый — отдельный элемент на своей дорожке. */}
         {layout.stages.map(({ stage: s, lane, visStart, visEnd }) => {
-          const conflictsWith = layout.conflictNames.get(s.stageId);
           // Состояние блока относительно выбранной задачи: подсвечен / притенён.
           const selected = selectedTaskId === s.taskId;
           const dimmed = selectedTaskId !== null && !selected;
@@ -613,8 +792,11 @@ function EmployeeRow({
                 e.stopPropagation(); // не дать фону сбросить выбор
                 setSelectedTaskId(selected ? null : s.taskId);
               }}
+              onMouseEnter={(e) => onExplain(s.stageId, emp.id, e.currentTarget)}
+              onMouseLeave={onExplainEnd}
               onDragStart={(e) => {
                 if (s.done) return;
+                onExplainEnd(); // карточка не должна висеть над перетаскиванием
                 e.dataTransfer.setData(DRAG_KEY, s.stageId);
                 e.dataTransfer.effectAllowed = 'move';
                 setDragging({
@@ -659,21 +841,9 @@ function EmployeeRow({
               } ${
                 selected ? 'z-10 ring-2 ring-slate-900 ring-offset-1' : ''
               } ${dimmed ? 'opacity-25' : ''}`}
-              title={`${s.taskName} · ${STAGE_LABELS[s.type]}${
-                s.done ? '\n✓ задача завершена' : ''
-              }${
-                s.clippedStart
-                  ? `\nначат ${
-                      pinnedStartById.has(s.stageId)
-                        ? shortLabel(pinnedStartById.get(s.stageId)!)
-                        : 'ранее'
-                    } — до начала горизонта, прожитая часть скрыта`
-                  : ''
-              }${
-                conflictsWith
-                  ? '\nНАЛОЖЕНИЕ с: ' + conflictsWith.join('; ')
-                  : ''
-              }${s.pinned && !s.done ? '\nзакреплён (двойной клик — открепить)' : ''}\nAlt+двойной клик — редактировать задачу`}
+              // Нативного title у блока нет: всё, что он показывал, вместе с
+              // объяснением размещения ушло в карточку по наведению — иначе
+              // системная подсказка всплывала бы поверх неё.
             >
               <span className="truncate px-1 text-[10px] font-medium leading-none">
                 {s.done ? `✓ ${s.taskName}` : s.taskName}
