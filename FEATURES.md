@@ -54,7 +54,7 @@
 
 | Фича | Статус | Спека | Доказательство (код · тест) | Релиз |
 |------|--------|-------|------------------------------|-------|
-| Undo/redo (Ctrl+Z / Shift+Z / Y) | ✅ | PRD §12 (архив) | `src/App.tsx` | базовый |
+| Undo/redo (Ctrl+Z / Shift+Z / Y) на всех правках плана | ✅ | PRD §12 (архив) · [releasenote.md](releasenote.md) (2026-09-02) | `src/App.tsx` (`editData` — единая точка правки плана) | 2026-09-02 |
 | Шаринг плана по постоянной ссылке (read-only) | ✅ | CLAUDE.md (Хранение) | `api/*.ts` · `src/storage/shareStorage.ts` | базовый |
 | Отзыв ссылки + editKey (чтение ≠ запись, лимиты) | ✅ | CLAUDE.md (Хранение) | `src/share/planGuards.ts` · `planGuards.test.ts` | базовый |
 | Экспорт плана в `.md` | ✅ | — | `src/export/markdownExport.ts` | базовый |

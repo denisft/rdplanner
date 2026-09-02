@@ -244,11 +244,36 @@ export default function App() {
     return Math.max(1, min);
   }, [viewData.tasks]);
 
+  // Ключ склейки: подряд идущие правки одного поля (посимвольный ввод
+  // приоритета) кладут в стек один снимок — Ctrl+Z возвращает значение
+  // до начала ввода, а не откатывает по цифре.
+  const mergeKeyRef = useRef<string | null>(null);
+
+  // Запомнить текущий снимок перед изменением и очистить стек повтора.
+  const pushUndo = (mergeKey?: string) => {
+    if (mergeKey && mergeKeyRef.current === mergeKey) return;
+    mergeKeyRef.current = mergeKey ?? null;
+    setUndoStack((h) => [...h.slice(-49), data]);
+    setRedoStack([]);
+  };
+
+  // Единственная точка изменения плана: снимок для отмены и сам апдейт
+  // делаются вместе. Отдельный setData в обработчике — путь к тому, что
+  // операцию забудут положить в undo (так «Отмена» и переставала работать
+  // на создании, правке и удалении задач и людей).
+  const editData = (
+    next: AppData | ((d: AppData) => AppData),
+    mergeKey?: string,
+  ) => {
+    pushUndo(mergeKey);
+    setData(next);
+  };
+
   // Новая задача попадает в активную команду. earliestStart = сегодня —
   // мягкая граница, чтобы задача вставала от текущего дня, а не от начала
   // горизонта (в прошлое). На старые задачи не влияет (у них поля нет).
   const addTask = (task: Task) => {
-    setData((d) => ({
+    editData((d) => ({
       ...d,
       tasks: [
         ...d.tasks,
@@ -264,45 +289,45 @@ export default function App() {
   };
 
   const updateTask = (task: Task) =>
-    setData((d) => ({
+    editData((d) => ({
       ...d,
       tasks: d.tasks.map((t) => (t.id === task.id ? task : t)),
     }));
 
   const deleteTask = (id: string) =>
-    setData((d) => ({ ...d, tasks: d.tasks.filter((t) => t.id !== id) }));
+    editData((d) => ({ ...d, tasks: d.tasks.filter((t) => t.id !== id) }));
 
   // Отметить задачу завершённой: этапы замораживаются на текущих датах,
   // блоки на ганте сереют, строка уезжает в секцию «Завершённые».
   const markDone = (taskId: string) => {
-    pushUndo();
-    setData(completeTask(data, result, taskId, formatISO(new Date())));
+    editData(completeTask(data, result, taskId, formatISO(new Date())));
     track('task_completed');
   };
 
   // Вернуть завершённую в работу (закрепления этапов остаются на месте).
   const markActive = (taskId: string) => {
-    pushUndo();
-    setData(reopenTask(data, taskId));
+    editData(reopenTask(data, taskId));
   };
 
+  // Приоритет правится посимвольно в поле ввода — склеиваем правки одной
+  // задачи в один шаг отмены.
   const setPriority = (id: string, priority: number) =>
-    setData((d) => ({
-      ...d,
-      tasks: d.tasks.map((t) => (t.id === id ? { ...t, priority } : t)),
-    }));
+    editData(
+      (d) => ({
+        ...d,
+        tasks: d.tasks.map((t) => (t.id === id ? { ...t, priority } : t)),
+      }),
+      `priority:${id}`,
+    );
 
+  // Сколько недель показывать — настройка вида, а не правка плана:
+  // намеренно мимо editData, чтобы не забивать стек отмены.
   const setHorizonWeeks = (w: number) =>
     setData((d) => ({ ...d, horizonWeeks: w }));
 
-  // Запомнить текущий снимок перед изменением и очистить стек повтора.
-  const pushUndo = () => {
-    setUndoStack((h) => [...h.slice(-49), data]);
-    setRedoStack([]);
-  };
-
   // Откатить последнее перетаскивание (Ctrl+Z).
   const undo = () => {
+    mergeKeyRef.current = null;
     setUndoStack((past) => {
       if (past.length === 0) return past;
       setRedoStack((r) => [...r, data]);
@@ -313,6 +338,7 @@ export default function App() {
 
   // Вернуть отменённое (Ctrl+Shift+Z / Ctrl+Y).
   const redo = () => {
+    mergeKeyRef.current = null;
     setRedoStack((future) => {
       if (future.length === 0) return future;
       setUndoStack((u) => [...u, data]);
@@ -327,11 +353,10 @@ export default function App() {
   const horizonTarget = shiftTarget(todayISO);
   const canShiftHorizon = data.horizonStart < horizonTarget;
   const shiftHorizon = () => {
-    pushUndo();
     // Сдвиг горизонта — операция над всем планом (общая шкала), поэтому
     // фиксируем прошлое по расписанию всех команд, а не только активной.
     const fullResult = schedule(data);
-    setData(shiftHorizonStart(data, fullResult, horizonTarget));
+    editData(shiftHorizonStart(data, fullResult, horizonTarget));
     setStatus({
       text: `Начало горизонта — ${formatFull(horizonTarget)}. Даты релизов не изменились; Ctrl+Z — вернуть.`,
       kind: 'ok',
@@ -414,8 +439,7 @@ export default function App() {
     if (!emp || !task || !stage) return;
     if (stageOverlapsUnavailable(emp, isoDate, stage.durationDays)) return;
     if (!pinRespectsOrder(task, stageId, isoDate, result)) return;
-    pushUndo();
-    setData((d) => ({
+    editData((d) => ({
       ...d,
       tasks: d.tasks.map((t) => ({
         ...t,
@@ -431,8 +455,7 @@ export default function App() {
 
   // Сняли закрепление — этап возвращается в авторазмещение.
   const unpinStage = (stageId: string) => {
-    pushUndo();
-    setData((d) => ({
+    editData((d) => ({
       ...d,
       tasks: d.tasks.map((t) => ({
         ...t,
@@ -465,8 +488,7 @@ export default function App() {
   // Снять ручные закрепления активной команды — страховка, если запутался
   // в перетаскиваниях. Чужие команды и завершённые задачи не трогаем.
   const resetPins = () => {
-    pushUndo();
-    setData((d) => ({
+    editData((d) => ({
       ...d,
       tasks: d.tasks.map((t) =>
         t.done || t.teamId !== effectiveTeamId
@@ -482,7 +504,7 @@ export default function App() {
   // --- Управление составом ---
   // Новый сотрудник заводится в активной команде.
   const addEmployee = (name: string, specialization: Specialization) => {
-    setData((d) => ({
+    editData((d) => ({
       ...d,
       employees: [
         ...d.employees,
@@ -493,14 +515,14 @@ export default function App() {
   };
 
   const updateEmployee = (id: string, patch: Partial<Employee>) =>
-    setData((d) => ({
+    editData((d) => ({
       ...d,
       employees: d.employees.map((e) => (e.id === id ? { ...e, ...patch } : e)),
     }));
 
   // Удаление человека снимает его со всех этапов (assigneeId → null).
   const deleteEmployee = (id: string) =>
-    setData((d) => ({
+    editData((d) => ({
       ...d,
       employees: d.employees.filter((e) => e.id !== id),
       tasks: d.tasks.map((t) => ({
@@ -519,8 +541,7 @@ export default function App() {
     );
     if (!name?.trim()) return;
     const id = newId();
-    pushUndo();
-    setData((d) => ({ ...d, teams: [...d.teams, { id, name: name.trim() }] }));
+    editData((d) => ({ ...d, teams: [...d.teams, { id, name: name.trim() }] }));
     setActiveTeam(id);
     setStatus({ text: `Команда «${name.trim()}» создана`, kind: 'ok' });
   };
@@ -530,7 +551,7 @@ export default function App() {
     if (!cur) return;
     const name = window.prompt('Новое название команды:', cur.name);
     if (!name?.trim()) return;
-    setData((d) => ({
+    editData((d) => ({
       ...d,
       teams: d.teams.map((t) =>
         t.id === cur.id ? { ...t, name: name.trim() } : t,
@@ -552,9 +573,8 @@ export default function App() {
       )
     )
       return;
-    pushUndo();
     const rest = data.teams.filter((t) => t.id !== cur.id);
-    setData((d) => ({
+    editData((d) => ({
       ...d,
       teams: rest,
       employees: d.employees.filter((e) => e.teamId !== cur.id),
@@ -577,7 +597,7 @@ export default function App() {
   const onLoad = async () => {
     try {
       const { data: loaded, handle: h } = await openFromFile();
-      setData(loaded);
+      editData(loaded);
       setHandle(h);
       setStatus({ text: 'Загружено из файла', kind: 'ok' });
     } catch {
@@ -976,8 +996,7 @@ export default function App() {
                       setShowFileMenu(false);
                       if (!window.confirm('Заменить текущий план демо-данными?'))
                         return;
-                      pushUndo();
-                      setData(makeSampleData());
+                      editData(makeSampleData());
                       setHandle(null);
                       setStatus({
                         text: 'Сброшено к демо-данным. Ctrl+Z — вернуть свой план.',
@@ -1386,7 +1405,6 @@ export default function App() {
         <UrgentTaskModal
           data={viewData}
           onApply={(urgent) => {
-            pushUndo();
             addTask(urgent);
             setShowUrgent(false);
           }}
