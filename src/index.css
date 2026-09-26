@@ -3,25 +3,160 @@
 
 /* Дизайн-токены в стиле MatDash: шрифт Manrope, синий primary,
    у каждого статусного цвета — бледная light-пара для фонов бейджей.
-   Токены доступны как классы: bg-primary, text-error, bg-warning-light… */
+   Токены доступны как классы: bg-primary, text-error, bg-warning-light…
+   Нейтральные поверхности и текст — семантические токены (bg-surface,
+   text-ink, border-line…): через них работает тёмная тема. */
 @theme {
   --font-sans: 'Manrope Variable', ui-sans-serif, system-ui, 'Segoe UI', Roboto,
     Arial, sans-serif;
 
   --color-primary: #3772ff;
   --color-primary-light: #ecf2ff;
+  --color-primary-ink: #2458d6;
   --color-secondary: #49beff;
   --color-secondary-light: #e8f7ff;
   --color-success: #13deb9;
   --color-success-light: #e6fffa;
+  --color-success-ink: #0b8f78;
   --color-warning: #ffae1f;
   --color-warning-light: #fef5e5;
+  --color-warning-ink: #955800;
   --color-error: #fa896b;
   --color-error-light: #fdede8;
+  --color-error-ink: #c62f35;
+  --color-danger: #e5484d;
 
-  /* Мягкая тень карточек вместо рамок. */
-  --shadow-card: 0 2px 4px -1px rgb(15 23 42 / 0.06),
-    0 9px 20px -4px rgb(100 116 139 / 0.16);
+  /* Поверхности и текст. */
+  --color-bg: #f3f6fb;
+  --color-surface: #ffffff;
+  --color-surface-2: #f7f9fc;
+  --color-hover: #f0f3f8;
+  --color-line: #e3e8f0;
+  --color-line-soft: #eef1f6;
+  --color-ink: #0f172a;
+  --color-muted: #5b6679;
+  --color-faint: #8a94a6;
+  --color-tip: #0f172a;
+  --color-tip-ink: #f8fafc;
+
+  /* Этапы на ганте: архитектура и разработка — разные оттенки (фиолетовый и
+     синий), раньше это были два почти одинаковых синих. */
+  --color-stage-arch: #8e5cf6;
+  --color-stage-arch-ink: #ffffff;
+  --color-stage-dev: #3772ff;
+  --color-stage-dev-ink: #ffffff;
+  --color-stage-review: #f5b030;
+  --color-stage-review-ink: #3d2600;
+  --color-stage-qa: #19c29a;
+  --color-stage-qa-ink: #053d30;
+  --color-stage-done: #e3e7ee;
+  --color-stage-done-ink: #6b7486;
+
+  --color-grid: #eef1f6;
+  --color-grid-week: #dde3ec;
+  --color-today: #e5484d;
+  --color-release: #12a37b;
+  --color-release-light: #e6f8f2;
+  --color-past: rgb(100 116 139 / 0.045);
+  --color-vacation: rgb(120 134 160 / 0.3);
+
+  /* Мягкая тень карточек вместо рамок; pop — для всплывающего. */
+  --shadow-card: 0 1px 2px rgb(15 23 42 / 0.05),
+    0 8px 24px -10px rgb(15 23 42 / 0.14);
+  --shadow-pop: 0 4px 10px rgb(15 23 42 / 0.06),
+    0 20px 44px -10px rgb(15 23 42 / 0.25);
+
+  --animate-pop: pop 0.12s ease-out;
+  --animate-toast: toast-in 0.2s ease-out;
+  --animate-fade: fade-in 0.15s ease-out;
+}
+
+@keyframes pop {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+}
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* Тёмная тема: переопределяются только токены. Выбор темы — личная
+   настройка вида (localStorage `resource-planner:theme`): явный выбор ставит
+   data-theme на <html>, без него действует системная тема.
+   Шкала slate переворачивается — так старые компоненты на slate-классах
+   (отчёт, сотрудники) остаются читаемыми без переписывания. */
+@layer theme {
+  :root[data-theme='dark'] {
+    color-scheme: dark;
+    --color-primary: #5a8bff;
+    --color-primary-light: rgb(90 139 255 / 0.16);
+    --color-primary-ink: #9ab8ff;
+    --color-secondary-light: rgb(73 190 255 / 0.14);
+    --color-success-light: rgb(19 222 185 / 0.13);
+    --color-success-ink: #3fd9b4;
+    --color-warning-light: rgb(245 176 48 / 0.14);
+    --color-warning-ink: #f7c56a;
+    --color-error-light: rgb(250 137 107 / 0.14);
+    --color-error-ink: #ff9a9d;
+    --color-danger: #ff6b6f;
+
+    --color-bg: #0e131b;
+    --color-surface: #151b25;
+    --color-surface-2: #1a2130;
+    --color-hover: #1f2737;
+    --color-line: #263043;
+    --color-line-soft: #1d2534;
+    --color-ink: #e7ecf4;
+    --color-muted: #9aa6ba;
+    --color-faint: #6f7b90;
+    --color-tip: #e7ecf4;
+    --color-tip-ink: #0f172a;
+
+    --color-stage-arch: #9b74ff;
+    --color-stage-dev: #4b7fff;
+    --color-stage-review: #e9a92c;
+    --color-stage-qa: #1fb58f;
+    --color-stage-done: #283142;
+    --color-stage-done-ink: #8793a8;
+
+    --color-grid: #1b2331;
+    --color-grid-week: #2a3446;
+    --color-today: #ff6b6f;
+    --color-release: #2fcf9f;
+    --color-release-light: rgb(47 207 159 / 0.13);
+    --color-past: rgb(0 0 0 / 0.16);
+    --color-vacation: rgb(148 163 184 / 0.22);
+
+    --shadow-card: 0 1px 2px rgb(0 0 0 / 0.3), 0 8px 24px -10px rgb(0 0 0 / 0.55);
+    --shadow-pop: 0 4px 10px rgb(0 0 0 / 0.3), 0 20px 44px -10px rgb(0 0 0 / 0.6);
+
+    --color-slate-50: #1a2130;
+    --color-slate-100: #1f2737;
+    --color-slate-200: #263043;
+    --color-slate-300: #334058;
+    --color-slate-400: #6f7b90;
+    --color-slate-500: #8e9ab0;
+    --color-slate-600: #a9b4c6;
+    --color-slate-700: #c7d0de;
+    --color-slate-800: #dfe5ee;
+    --color-slate-900: #eef2f8;
+    --color-rose-600: #ff8a8d;
+    --color-rose-700: #ff9a9d;
+    --color-amber-600: #f7c56a;
+    --color-amber-700: #f7c56a;
+    --color-teal-600: #3fd9b4;
+    --color-teal-700: #3fd9b4;
+    --color-emerald-600: #3fd9b4;
+  }
 }
 
 html,
@@ -32,7 +167,16 @@ body,
 }
 
 body {
-  /* Светлый серо-голубой фон страницы — белые карточки читаются на нём. */
-  background: #f4f7fb;
-  color: #0f172a;
+  background: var(--color-bg);
+  color: var(--color-ink);
+  -webkit-font-smoothing: antialiased;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
 }

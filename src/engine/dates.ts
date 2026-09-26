@@ -122,6 +122,17 @@ export const SHORT_MONTHS = [
   'дек',
 ];
 
+/** Номер недели по ISO 8601 (неделя с понедельника, 1-я содержит 4 января). */
+export function isoWeek(iso: string): number {
+  const d = parseISO(iso);
+  const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const dow = t.getUTCDay() || 7;
+  // Четверг той же недели определяет, к какому году она относится.
+  t.setUTCDate(t.getUTCDate() + 4 - dow);
+  const yearStart = Date.UTC(t.getUTCFullYear(), 0, 1);
+  return Math.ceil(((t.getTime() - yearStart) / 86400000 + 1) / 7);
+}
+
 /** Короткая подпись даты для шапки Гантта, напр. "3 июн". */
 export function shortLabel(iso: string): string {
   const d = parseISO(iso);

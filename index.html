@@ -5,6 +5,17 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Планировщик ресурсов команды</title>
+    <!-- Тема до первого рендера, чтобы тёмная тема не мигала светлой.
+         Логика та же, что в src/ui/theme.ts. -->
+    <script>
+      (function () {
+        var t = null;
+        try { t = localStorage.getItem('resource-planner:theme'); } catch (e) {}
+        if (t !== 'light' && t !== 'dark')
+          t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        document.documentElement.setAttribute('data-theme', t);
+      })();
+    </script>
     <!-- Umami Cloud: посещаемость и события. Скрипт и эндпоинт проксируются
          через свой домен (rewrites в vercel.json), чтобы корпоративные
          адблокеры не резали *.umami.is. Без data-host-url облачный скрипт

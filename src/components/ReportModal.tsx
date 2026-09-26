@@ -18,6 +18,7 @@ import { buildTaskSizingReport } from '../engine/taskSizing';
 import { downloadTaskSizingCsv } from '../export/taskSizingCsv';
 import { buildTaskEffortReport } from '../engine/taskEffort';
 import { downloadTaskEffortCsv } from '../export/taskEffortCsv';
+import { Modal } from '../ui/Dialog';
 import { formatISO, parseISO, SHORT_MONTHS, SHORT_WEEKDAYS } from '../engine/dates';
 
 interface Props {
@@ -132,23 +133,7 @@ export function ReportModal({ data, result, onClose }: Props) {
   };
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/40 p-4"
-      onClick={onClose}
-    >
-      <div
-        className="my-8 w-full max-w-3xl rounded-xl bg-white p-5 shadow-xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-slate-800">Отчёт за период</h2>
-          <button
-            onClick={onClose}
-            className="rounded-full px-3.5 py-1.5 text-sm text-slate-600 hover:bg-slate-100"
-          >
-            Закрыть
-          </button>
-        </div>
+    <Modal title="Отчёт за период" onClose={onClose} width="max-w-3xl">
 
         {/* Выбор периода: пресеты от сегодня + произвольные даты. */}
         <div className="mb-4 flex flex-wrap items-end gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
@@ -428,7 +413,6 @@ export function ReportModal({ data, result, onClose }: Props) {
             )}
           </div>
         )}
-      </div>
-    </div>
+    </Modal>
   );
 }

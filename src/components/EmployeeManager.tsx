@@ -3,6 +3,8 @@ import type { Employee, Specialization, StageType } from '../types';
 import { SPECIALIZATION_LABELS, SPECIALIZATION_ORDER, STAGE_LABELS } from '../types';
 import { GRANTABLE_EXTRA_STAGES } from '../roles';
 import { shortLabel } from '../engine/dates';
+import { Modal } from '../ui/Dialog';
+import { useConfirm } from '../ui/useConfirm';
 
 interface Props {
   employees: Employee[];
@@ -34,25 +36,7 @@ export function EmployeeManager({
   };
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/40 p-4"
-      onClick={onClose}
-    >
-      <div
-        className="my-8 w-full max-w-2xl rounded-xl bg-white p-5 shadow-xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-slate-800">
-            Команда · {employees.length} чел.
-          </h2>
-          <button
-            onClick={onClose}
-            className="rounded-full px-3.5 py-1.5 text-sm text-slate-600 hover:bg-slate-100"
-          >
-            Закрыть
-          </button>
-        </div>
+    <Modal title={`Команда · ${employees.length} чел.`} onClose={onClose} width="max-w-2xl">
 
         {/* Добавление нового сотрудника */}
         <div className="mb-4 flex items-end gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
@@ -111,8 +95,7 @@ export function EmployeeManager({
             </div>
           ))}
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -127,6 +110,7 @@ function EmployeeRow({
 }) {
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
+  const confirm = useConfirm();
 
   const addRange = () => {
     if (!from || !to) return;
@@ -179,8 +163,14 @@ function EmployeeRow({
           ))}
         </select>
         <button
-          onClick={() => {
-            if (confirm(`Удалить «${emp.name}» из команды?`)) onDelete(emp.id);
+          onClick={async () => {
+            const ok = await confirm({
+              title: `Удалить «${emp.name}» из команды?`,
+              text: 'Человек снимется со всех своих этапов — они останутся без исполнителя. Отменить можно через Ctrl+Z.',
+              confirmLabel: 'Удалить',
+              danger: true,
+            });
+            if (ok) onDelete(emp.id);
           }}
           className="rounded-full px-2.5 py-1 text-xs text-slate-400 hover:bg-error-light hover:text-rose-600"
         >

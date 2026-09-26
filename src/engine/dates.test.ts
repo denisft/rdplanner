@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { nextReleaseDay } from './dates';
+import { isoWeek, nextReleaseDay } from './dates';
 
 // 2026-06: 01 пн, 02 вт, 03 ср, 04 чт, 05 пт, 08 пн, 09 вт, 10 ср, 11 чт.
 describe('nextReleaseDay — ближайший вт/чт строго после окончания QA', () => {
@@ -21,5 +21,21 @@ describe('nextReleaseDay — ближайший вт/чт строго посл�
 
   it('релиз всегда строго после дня окончания QA', () => {
     expect(nextReleaseDay('2026-06-09')).toBe('2026-06-11'); // вт → чт
+  });
+});
+
+describe('isoWeek — номер недели по ISO 8601', () => {
+  it('обычная неделя в середине года', () => {
+    expect(isoWeek('2026-09-21')).toBe(39); // пн
+    expect(isoWeek('2026-09-27')).toBe(39); // вс той же недели
+  });
+
+  it('1 января 2026 (чт) — первая неделя', () => {
+    expect(isoWeek('2026-01-01')).toBe(1);
+    expect(isoWeek('2025-12-29')).toBe(1); // пн этой недели — ещё декабрь
+  });
+
+  it('3 января 2027 (вс) относится к последней неделе 2026 года', () => {
+    expect(isoWeek('2027-01-03')).toBe(53);
   });
 });
