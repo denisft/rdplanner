@@ -69,6 +69,13 @@
   --animate-pop: pop 0.12s ease-out;
   --animate-toast: toast-in 0.2s ease-out;
   --animate-fade: fade-in 0.15s ease-out;
+  --animate-drawer: drawer-in 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@keyframes drawer-in {
+  from {
+    transform: translateX(100%);
+  }
 }
 
 @keyframes pop {

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { urgentImpact } from './urgentImpact';
+import { releaseShifts, urgentImpact } from './urgentImpact';
+import { schedule } from './scheduler';
 import type { AppData, Employee, Task } from '../types';
 
 function emp(id: string, name = id): Employee {
@@ -248,5 +249,42 @@ describe('urgentImpact', () => {
     urgentImpact(data, urgentDev('dev', 3));
     expect(JSON.stringify(data)).toBe(snapshot);
     expect(data.tasks).toHaveLength(1);
+  });
+});
+
+describe('releaseShifts — кого задела правка задачи', () => {
+  // Две задачи на одном разработчике: A важнее и идёт первой, B — следом.
+  const plan = (durationA: number) =>
+    base(
+      [
+        {
+          id: 'tA',
+          name: 'A',
+          priority: 1,
+          stages: [{ id: 'a-d', type: 'development', durationDays: durationA, assigneeId: 'dev' }],
+        },
+        {
+          id: 'tB',
+          name: 'B',
+          priority: 2,
+          stages: [{ id: 'b-d', type: 'development', durationDays: 2, assigneeId: 'dev' }],
+        },
+      ],
+      [emp('dev')],
+    );
+
+  it('удлинили A — B уезжает на ту же дельту, сама A в список не попадает', () => {
+    const rows = releaseShifts(schedule(plan(3)), schedule(plan(5)), 'tA');
+    expect(rows.map((r) => r.taskId)).toEqual(['tB']);
+    expect(rows[0].shiftDays).toBe(2);
+  });
+
+  it('укоротили A — B приезжает раньше, сдвиг отрицательный', () => {
+    const rows = releaseShifts(schedule(plan(5)), schedule(plan(3)), 'tA');
+    expect(rows[0].shiftDays).toBe(-2);
+  });
+
+  it('правка без последствий — пустой список', () => {
+    expect(releaseShifts(schedule(plan(3)), schedule(plan(3)), 'tA')).toEqual([]);
   });
 });

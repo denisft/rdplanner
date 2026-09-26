@@ -2,9 +2,12 @@
 // задачу с высшим приоритетом. Рабочий стейт не меняется — считаем два прогона
 // движка (как есть / с срочной) и дельту по окончаниям QA. Отчёт целиком
 // производный, в AppData ничего нового не попадает.
+//
+// Та же дельта (releaseShifts) работает для любой правки задачи в боковой
+// панели: «как это скажется на других» — сравнение двух расписаний.
 
 import type { AppData, Task } from '../types';
-import { schedule } from './scheduler';
+import { schedule, type ScheduleResult } from './scheduler';
 
 /**
  * Исход для затронутой задачи. Пока движок двигает этап только целиком,
@@ -20,7 +23,7 @@ export interface ImpactRow {
   releaseBefore: string | null;
   /** Дата релиза после вставки. */
   releaseAfter: string | null;
-  /** Сдвиг окончания QA в рабочих днях (>0 = уехало вправо). */
+  /** Сдвиг окончания QA в рабочих днях (>0 = уехало вправо, <0 = раньше). */
   shiftDays: number;
   outcome: ImpactOutcome;
 }
@@ -34,28 +37,28 @@ export interface UrgentImpact {
   urgentUnplaced: boolean;
 }
 
-export function urgentImpact(base: AppData, urgent: Task): UrgentImpact {
-  const before = schedule(base);
-  const after = schedule({ ...base, tasks: [...base.tasks, urgent] });
-
+/**
+ * Какие живые задачи сдвинулись между двумя расписаниями одного плана.
+ * `changedTaskId` — задача, которую правят (её собственный сдвиг — не
+ * «задело», а сама правка; в список не попадает).
+ * Оба расписания должны строиться от одного horizonStart — тогда индексы
+ * дней сравнимы напрямую.
+ */
+export function releaseShifts(
+  before: ScheduleResult,
+  after: ScheduleResult,
+  changedTaskId?: string,
+): ImpactRow[] {
   const beforeById = new Map(before.releases.map((r) => [r.taskId, r]));
-
   const rows: ImpactRow[] = [];
-  let urgentRelease: string | null = null;
-  let urgentUnplaced = false;
 
   for (const a of after.releases) {
-    if (a.taskId === urgent.id) {
-      urgentRelease = a.releaseDate;
-      urgentUnplaced = a.qaEndIndex < 0; // движок не нашёл слот
-      continue;
-    }
+    if (a.taskId === changedTaskId) continue;
     const b = beforeById.get(a.taskId);
     if (!b) continue;
     // Завершённые заморожены — «кого задело» только про живые задачи.
     if (a.done) continue;
 
-    // Оба расписания строятся от одного horizonStart → индексы сравнимы напрямую.
     // Считаем в рабочих днях по qaEndIndex, а не по календарным датам релиза:
     // так не ловим артефакт округления правила вт/чт (nextReleaseDay).
     const shiftDays = a.qaEndIndex - b.qaEndIndex;
@@ -72,5 +75,17 @@ export function urgentImpact(base: AppData, urgent: Task): UrgentImpact {
   }
 
   rows.sort((x, y) => y.shiftDays - x.shiftDays);
-  return { rows, urgentRelease, urgentUnplaced };
+  return rows;
+}
+
+export function urgentImpact(base: AppData, urgent: Task): UrgentImpact {
+  const before = schedule(base);
+  const after = schedule({ ...base, tasks: [...base.tasks, urgent] });
+  const placed = after.releases.find((r) => r.taskId === urgent.id);
+  return {
+    rows: releaseShifts(before, after, urgent.id),
+    urgentRelease: placed?.releaseDate ?? null,
+    // Движок не нашёл слот в расчётном горизонте.
+    urgentUnplaced: placed ? placed.qaEndIndex < 0 : false,
+  };
 }

@@ -36,8 +36,8 @@ import { shiftHorizonStart, shiftTarget } from './engine/horizon';
 import { formatISO, parseISO } from './engine/dates';
 import { rangeLabel } from './engine/explain';
 import { GanttChart, type GanttHandle } from './components/GanttChart';
-import { TaskForm } from './components/TaskForm';
-import { UrgentTaskModal } from './components/UrgentTaskModal';
+import { TaskDrawer, type DrawerImpact, type DrawerMode } from './components/TaskDrawer';
+import { releaseShifts } from './engine/urgentImpact';
 import { EmployeeManager } from './components/EmployeeManager';
 import { ReportModal } from './components/ReportModal';
 import { ReleasesTable } from './components/ReleasesTable';
@@ -158,10 +158,14 @@ export default function App() {
   const undoAction = { label: 'Отменить', onClick: undo };
 
   const [handle, setHandle] = useState<FsFileHandle | null>(null);
-  const [showForm, setShowForm] = useState(false);
-  // Модалка «Срочная задача» (БЛ-17): предпросмотр удара до внесения в план.
-  const [showUrgent, setShowUrgent] = useState(false);
-  const [editingTask, setEditingTask] = useState<Task | null>(null);
+  // Боковая панель задачи: создание, правка или срочная (БЛ-17). Пока она
+  // открыта, гант и таблица показывают план с черновиком — предпросмотр.
+  const [drawer, setDrawer] = useState<{ mode: DrawerMode; task?: Task } | null>(null);
+  const [draft, setDraft] = useState<Task | null>(null);
+  const closeDrawer = () => {
+    setDrawer(null);
+    setDraft(null);
+  };
   const [showTeam, setShowTeam] = useState(false);
   // Модалка «Отчёт за период» — доступна и в режиме просмотра по ссылке.
   const [showReport, setShowReport] = useState(false);
@@ -241,6 +245,36 @@ export default function App() {
   // Reflow: расписание активной команды пересчитывается при изменении её данных.
   const result = useMemo(() => schedule(viewData), [viewData]);
 
+  // Предпросмотр боковой панели: план активной команды с черновиком задачи.
+  // Рабочий data не меняется до «Сохранить». Новая задача, как и в addTask,
+  // получает earliestStart = сегодня — чтобы предпросмотр совпал с итогом.
+  const todayISO = formatISO(new Date());
+  const previewView = useMemo(() => {
+    if (!drawer || !draft) return viewData;
+    const t: Task = { ...draft, teamId: effectiveTeamId };
+    if (drawer.mode === 'edit') {
+      return { ...viewData, tasks: viewData.tasks.map((x) => (x.id === t.id ? t : x)) };
+    }
+    return { ...viewData, tasks: [...viewData.tasks, { ...t, earliestStart: todayISO }] };
+  }, [drawer, draft, viewData, effectiveTeamId, todayISO]);
+  const shown = useMemo(
+    () => (previewView === viewData ? result : schedule(previewView)),
+    [previewView, viewData, result],
+  );
+
+  // Что показать внизу панели: релиз черновика и чьи релизы он сдвинул.
+  const drawerImpact = useMemo<DrawerImpact | null>(() => {
+    if (!drawer || !draft) return null;
+    const after = shown.releases.find((r) => r.taskId === draft.id);
+    const before = result.releases.find((r) => r.taskId === draft.id);
+    return {
+      release: after?.releaseDate ?? null,
+      releaseBefore: drawer.mode === 'edit' ? (before?.releaseDate ?? null) : null,
+      unplaced: after ? after.qaEndIndex < 0 : false,
+      rows: releaseShifts(result, shown, draft.id),
+    };
+  }, [drawer, draft, shown, result]);
+
   // Автосохранение в localStorage (только в своём режиме редактирования).
   useEffect(() => {
     if (!readOnly) autosave(data);
@@ -256,8 +290,8 @@ export default function App() {
     (doneTaskCount > 0 ? ` · ${doneTaskCount} завершено` : '');
 
   const releasesSorted = useMemo(
-    () => [...result.releases].sort((a, b) => a.qaEndIndex - b.qaEndIndex),
-    [result.releases],
+    () => [...shown.releases].sort((a, b) => a.qaEndIndex - b.qaEndIndex),
+    [shown.releases],
   );
 
   // Таблица: активные — сверху, завершённые — в свёрнутую секцию
@@ -267,7 +301,7 @@ export default function App() {
     [releasesSorted],
   );
   const doneReleases = useMemo(() => {
-    const completedAt = new Map(viewData.tasks.map((t) => [t.id, t.completedAt ?? '']));
+    const completedAt = new Map(previewView.tasks.map((t) => [t.id, t.completedAt ?? '']));
     return releasesSorted
       .filter((r) => r.done)
       .sort((a, b) =>
@@ -275,10 +309,10 @@ export default function App() {
           completedAt.get(a.taskId) ?? '',
         ),
       );
-  }, [releasesSorted, viewData.tasks]);
+  }, [releasesSorted, previewView.tasks]);
 
   // Последний видимый день горизонта — для пометки «за горизонтом».
-  const lastVisibleDate = result.days[visibleDays - 1] ?? null;
+  const lastVisibleDate = shown.days[visibleDays - 1] ?? null;
 
   const nextPriority = useMemo(() => {
     const min = viewData.tasks.reduce((m, t) => Math.min(m, t.priority), 3);
@@ -354,7 +388,6 @@ export default function App() {
 
   // Сдвиг начала горизонта к текущей неделе (минус неделя контекста):
   // не перепланирование, а фиксация прошлого — даты релизов не меняются.
-  const todayISO = formatISO(new Date());
   const horizonTarget = shiftTarget(todayISO);
   const canShiftHorizon = data.horizonStart < horizonTarget;
   const shiftHorizon = () => {
@@ -390,8 +423,7 @@ export default function App() {
     }
   };
 
-  const anyModal =
-    showForm || showUrgent || editingTask !== null || showTeam || showReport || showHelp;
+  const anyModal = drawer !== null || showTeam || showReport || showHelp;
 
   // Горячие клавиши. Однобуквенные — только когда фокус не в поле ввода и не
   // в открытом окне; Ctrl-сочетания — везде, кроме полей ввода.
@@ -421,7 +453,7 @@ export default function App() {
       // Проверяем физическую клавишу (e.code): N и T работают и в русской раскладке.
       if (e.code === 'KeyN' && !readOnly) {
         e.preventDefault();
-        setShowForm(true);
+        setDrawer({ mode: 'new' });
       } else if (e.code === 'KeyT') {
         ganttRef.current?.scrollToToday();
       } else if (e.key === '?' || (e.code === 'Slash' && e.shiftKey)) {
@@ -481,10 +513,10 @@ export default function App() {
     });
   };
 
-  // Клик по блоку на ганте или строке таблицы — открыть задачу.
+  // Клик по блоку на ганте или строке таблицы — открыть задачу в панели.
   const openTask = (taskId: string) => {
     const task = data.tasks.find((t) => t.id === taskId);
-    if (task) setEditingTask(task);
+    if (task) setDrawer({ mode: 'edit', task });
   };
 
   // Завершённые не в счёт: их закрепления — заморозка истории, а не ручные
@@ -845,15 +877,15 @@ export default function App() {
   const ganttEl = (
     <GanttChart
       ref={ganttRef}
-      data={viewData}
-      result={result}
+      data={previewView}
+      result={shown}
       showReleases={showReleases}
       fillHeight={ganttFull}
       readOnly={readOnly}
       onMoveStage={readOnly ? noop : moveStage}
       onUnpinStage={readOnly ? noop : unpinStage}
       onOpenTask={readOnly ? noop : openTask}
-      highlightTaskId={hoverTaskId}
+      highlightTaskId={drawer ? (draft?.id ?? null) : hoverTaskId}
       onHoverTask={setHoverTaskId}
       onManagePeople={() => setShowTeam(true)}
       headStart={ganttHeadStart}
@@ -928,7 +960,7 @@ export default function App() {
                 <Redo2 size={17} />
               </IconButton>
               <span className="mx-0.5 h-[22px] w-px bg-line" aria-hidden />
-              <WarningsButton warnings={result.warnings} />
+              <WarningsButton warnings={shown.warnings} />
               <IconButton label="Управление и клавиши" shortcut="?" onClick={() => setShowHelp(true)}>
                 <Keyboard size={17} />
               </IconButton>
@@ -936,13 +968,13 @@ export default function App() {
             </div>
             <div className="flex flex-wrap items-center gap-1.5">
               <Tip label="Новая задача" shortcut="N">
-                <Button variant="primary" onClick={() => setShowForm(true)}>
+                <Button variant="primary" onClick={() => setDrawer({ mode: 'new' })}>
                   <Plus size={16} />
                   Задача
                 </Button>
               </Tip>
               <Tip label="Срочная задача: видно, кого заденет, до внесения в план">
-                <Button onClick={() => setShowUrgent(true)}>
+                <Button onClick={() => setDrawer({ mode: 'urgent' })}>
                   <Zap size={16} className="text-warning" />
                   Срочная
                 </Button>
@@ -1076,13 +1108,15 @@ export default function App() {
         <ReleasesTable
           activeReleases={activeReleases}
           doneReleases={doneReleases}
-          tasks={viewData.tasks}
+          tasks={previewView.tasks}
           employees={viewData.employees}
           lastVisibleDate={lastVisibleDate}
           readOnly={readOnly}
           highlightTaskId={hoverTaskId}
-          selectedTaskId={editingTask?.id ?? null}
-          releasesBefore={null}
+          selectedTaskId={drawer ? (draft?.id ?? null) : null}
+          releasesBefore={
+            drawer ? new Map(result.releases.map((r) => [r.taskId, r.releaseDate])) : null
+          }
           query={query}
           onQueryChange={setQuery}
           searchRef={searchRef}
@@ -1099,33 +1133,29 @@ export default function App() {
         />
       </main>
 
-      {showForm && (
-        <TaskForm
-          employees={viewData.employees}
+      {drawer && (
+        <TaskDrawer
+          key={drawer.task?.id ?? drawer.mode}
+          mode={drawer.mode}
+          initialTask={drawer.task}
           defaultPriority={nextPriority}
-          onAdd={addTask}
-          onClose={() => setShowForm(false)}
-        />
-      )}
-
-      {showUrgent && (
-        <UrgentTaskModal
-          data={viewData}
-          onApply={(urgent) => {
-            addTask(urgent);
-            setShowUrgent(false);
-          }}
-          onClose={() => setShowUrgent(false)}
-        />
-      )}
-
-      {editingTask && (
-        <TaskForm
           employees={viewData.employees}
-          defaultPriority={editingTask.priority}
-          initialTask={editingTask}
-          onAdd={updateTask}
-          onClose={() => setEditingTask(null)}
+          impact={drawerImpact}
+          onDraftChange={setDraft}
+          onSave={(task) => {
+            if (drawer.mode === 'edit') updateTask(task);
+            else addTask(task);
+            closeDrawer();
+          }}
+          onDelete={
+            drawer.task
+              ? () => {
+                  deleteTask(drawer.task!.id);
+                  closeDrawer();
+                }
+              : undefined
+          }
+          onClose={closeDrawer}
         />
       )}
 
