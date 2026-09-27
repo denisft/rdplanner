@@ -20,6 +20,7 @@ import { overloadedDays } from '../engine/scheduler';
 import { explainPlacement, rangeLabel } from '../engine/explain';
 import type { PinOrderBounds } from '../engine/pinOrder';
 import { pinOrderBounds } from '../engine/pinOrder';
+import { gridDayCount } from '../engine/gridRange';
 import {
   parseISO,
   formatISO,
@@ -94,8 +95,10 @@ interface RowLayout {
   laneCount: number;
   /** Непрерывные диапазоны перегруженных дней (индексы видимой сетки). */
   conflicts: { from: number; to: number }[];
-  /** Видимых дней, занятых хотя бы одним этапом. */
+  /** Дней выбранного горизонта, занятых хотя бы одним этапом. */
   busyDays: number;
+  /** Длина окна загрузки — знаменатель в «N/M дн». */
+  loadDays: number;
   /** Видимых дней с наложением (>1 этап). */
   overloadDays: number;
   /** Этапов за правым краем видимого горизонта. */
@@ -218,12 +221,14 @@ export function GanttChart({
     return () => ro.disconnect();
   }, []);
 
-  const visibleDays = data.horizonWeeks * 5;
-  const days = result.days.slice(0, visibleDays);
+  // Выбранный горизонт — масштаб: столько недель помещается на экран. Сетка
+  // тянется дальше, до последнего этапа, остальное — горизонтальным скроллом.
+  const horizonDays = data.horizonWeeks * 5;
+  const days = result.days.slice(0, gridDayCount(result, data.horizonWeeks));
   const nameW = boxWidth > 0 && boxWidth < 640 ? NAME_W_NARROW : NAME_W;
   const cell =
     boxWidth > 0
-      ? Math.max(MIN_CELL, Math.floor((boxWidth - nameW - 1) / Math.max(1, days.length)))
+      ? Math.max(MIN_CELL, Math.floor((boxWidth - nameW - 1) / Math.max(1, horizonDays)))
       : 34;
 
   const stageById = useMemo(
@@ -302,9 +307,10 @@ export function GanttChart({
   // Раскладка строк не зависит от наведения — считаем один раз на расчёт.
   const layouts = useMemo(() => {
     const m = new Map<string, RowLayout>();
-    for (const emp of data.employees) m.set(emp.id, layoutRow(emp.id, days.length, result));
+    for (const emp of data.employees)
+      m.set(emp.id, layoutRow(emp.id, days.length, horizonDays, result));
     return m;
-  }, [data.employees, days.length, result]);
+  }, [data.employees, days.length, horizonDays, result]);
 
   // Дни релизов по задачам -> индекс в видимой сетке (в один день могут попасть
   // несколько задач — показываем один флажок со счётчиком). Релизы за правым
@@ -474,7 +480,7 @@ export function GanttChart({
                       <Tip
                         label={
                           <ReleaseList
-                            title="Релизы за горизонтом — увеличьте горизонт, чтобы увидеть их на сетке"
+                            title="Релизы за пределами расчёта — дальше года от начала плана"
                             lines={beyondReleases.map((r) => `${r.name} — ${shortLabel(r.date)}`)}
                           />
                         }
@@ -786,6 +792,8 @@ function StageExplainCard({
 function layoutRow(
   empId: string,
   visibleCount: number,
+  /** Окно для загрузки «N/M дн» — выбранный горизонт, а не вся сетка. */
+  loadCount: number,
   result: ScheduleResult,
 ): RowLayout {
   const own = result.scheduledStages.filter((s) => s.assigneeId === empId);
@@ -839,7 +847,7 @@ function layoutRow(
 
   let busyDays = 0;
   if (occ) {
-    for (const idx of occ.keys()) if (idx < visibleCount) busyDays++;
+    for (const idx of occ.keys()) if (idx < loadCount) busyDays++;
   }
 
   return {
@@ -847,6 +855,7 @@ function layoutRow(
     laneCount: Math.max(1, laneEnds.length),
     conflicts,
     busyDays,
+    loadDays: loadCount,
     overloadDays: overloaded.length,
     hiddenAfter,
   };
@@ -954,7 +963,8 @@ function EmployeeRow({
     return Math.max(0, Math.min(days.length - 1, Math.floor((e.clientX - rect.left) / cell)));
   };
 
-  const load = days.length > 0 ? Math.min(100, (layout.busyDays / days.length) * 100) : 0;
+  const load =
+    layout.loadDays > 0 ? Math.min(100, (layout.busyDays / layout.loadDays) * 100) : 0;
   const hasHighlight = highlightTaskId !== null;
 
   return (
@@ -980,7 +990,7 @@ function EmployeeRow({
                 </span>
               </Tip>
             )}
-            {layout.busyDays}/{days.length} дн
+            {layout.busyDays}/{layout.loadDays} дн
           </span>
         </div>
         <div className="h-1 overflow-hidden rounded-full bg-line-soft">

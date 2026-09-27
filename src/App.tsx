@@ -33,6 +33,7 @@ import { pinRespectsOrder } from './engine/pinOrder';
 import { teamView } from './engine/teams';
 import { completeTask, reopenTask } from './engine/complete';
 import { shiftHorizonStart, shiftTarget } from './engine/horizon';
+import { gridDayCount } from './engine/gridRange';
 import { formatISO, parseISO } from './engine/dates';
 import { rangeLabel } from './engine/explain';
 import { GanttChart, type GanttHandle } from './components/GanttChart';
@@ -280,7 +281,8 @@ export default function App() {
     if (!readOnly) autosave(data);
   }, [data, readOnly]);
 
-  const visibleDays = data.horizonWeeks * 5;
+  // Длина сетки ганта: выбранный горизонт, растянутый до последнего этапа.
+  const visibleDays = gridDayCount(shown, data.horizonWeeks);
 
   // Счётчик в шапке — по активной команде; завершённые не смешиваем с работой.
   const activeTaskCount = viewData.tasks.filter((t) => !t.done).length;
@@ -788,9 +790,9 @@ export default function App() {
     <>
       <h2 className="flex items-baseline gap-2.5 text-[15px] font-extrabold tracking-tight">
         План
-        {result.days.length >= visibleDays && (
+        {visibleDays > 0 && (
           <small className="text-[12.5px] font-semibold text-faint tabular-nums">
-            {rangeLabel(result.days[0], result.days[visibleDays - 1])}
+            {rangeLabel(shown.days[0], shown.days[visibleDays - 1])}
           </small>
         )}
       </h2>
