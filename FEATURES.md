@@ -72,6 +72,7 @@
 | Боковая панель задачи: живой предпросмотр плана и «как это скажется на других» при создании, правке и срочной задаче | ✅ | [releasenote.md](releasenote.md) (2026-09-26) | `src/components/TaskDrawer.tsx` · `src/engine/urgentImpact.ts` (`releaseShifts`) · `urgentImpact.test.ts` | 2026-09-26 |
 | Новый интерфейс: иконки с подсказками, гант на всю ширину (номера недель, строка релизов, полоска загрузки, подсказка места броска), связь ганта и таблицы, поиск, тосты с «Отменить», свои окна вместо системных | ✅ | [releasenote.md](releasenote.md) (2026-09-26) | `src/components/GanttChart.tsx` · `src/components/ReleasesTable.tsx` · `src/ui/*` | 2026-09-26 |
 | Тёмная тема (светлая / тёмная / системная) | ✅ | [releasenote.md](releasenote.md) (2026-09-26) | `src/index.css` (токены) · `src/ui/theme.ts` | 2026-09-26 |
+| Гант тянется до последнего этапа и релиза, выбор недель — масштаб, а не обрезка | ✅ | [releasenote.md](releasenote.md) (2026-09-27) | `src/engine/gridRange.ts` · `gridRange.test.ts` · `src/components/GanttChart.tsx` | 2026-09-27 |
 
 ---
 
