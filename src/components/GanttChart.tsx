@@ -1083,6 +1083,11 @@ function EmployeeRow({
           const iconW = s.done || s.pinned ? 14 : 0;
           const fits = textWidth(s.taskName) + 14 + iconW <= width;
           const outsideW = gapAfter * cell - 8;
+          const outside = !fits && outsideW >= 48;
+          // Название не влезло и вынести некуда — показываем внутри хотя бы начало:
+          // в узком блоке без многоточия и с меньшими полями, чтобы буквам осталось место.
+          const cropped = !fits && !outside;
+          const narrow = cropped && width < 44;
           const top = lane * LANE_H + (rowH - layout.laneCount * LANE_H) / 2 + (LANE_H - BLOCK_H) / 2;
           return (
             <div key={s.stageId}>
@@ -1121,7 +1126,7 @@ function EmployeeRow({
                 onDragEnd={endDrag}
                 onDoubleClick={() => onDoubleClickStage(s)}
                 style={{ left: visStart * cell + 1.5, width, top, height: BLOCK_H }}
-                className={`absolute z-[1] flex items-center gap-[3px] overflow-hidden px-[7px] text-[11.5px] leading-none font-bold whitespace-nowrap shadow-[inset_0_-1px_0_rgb(0_0_0/0.1)] transition-[opacity,box-shadow] select-none focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-primary ${
+                className={`absolute z-[1] flex items-center gap-[3px] overflow-hidden ${narrow ? 'px-[3px]' : 'px-[7px]'} text-[11.5px] leading-none font-bold whitespace-nowrap shadow-[inset_0_-1px_0_rgb(0_0_0/0.1)] transition-[opacity,box-shadow] select-none focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-primary ${
                   s.done
                     ? `${DONE_STAGE_STYLE} ${readOnly ? 'cursor-default' : 'cursor-pointer'}`
                     : `${STAGE_STYLE[s.type]} ${readOnly ? 'cursor-default' : 'cursor-grab'}`
@@ -1138,10 +1143,12 @@ function EmployeeRow({
                 ) : s.pinned ? (
                   <Pin size={11} strokeWidth={2.4} className="shrink-0" />
                 ) : null}
-                {fits && <span className="truncate">{s.taskName}</span>}
+                {(fits || cropped) && (
+                  <span className={narrow ? 'min-w-0 overflow-hidden' : 'truncate'}>{s.taskName}</span>
+                )}
               </div>
               {/* Название не влезло в блок — выносим справа, если есть место. */}
-              {!fits && outsideW >= 48 && (
+              {outside && (
                 <span
                   className={`pointer-events-none absolute z-[1] truncate text-[11.5px] leading-[22px] font-semibold text-muted transition-opacity ${
                     dimmed ? 'opacity-25' : ''
