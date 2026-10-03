@@ -276,6 +276,16 @@ export function GanttChart({
     }
   }, [boxWidth, todayIndex, cell]);
 
+  // Режим «Прошлое» дорисовывает колонки слева: компенсируем прокрутку, чтобы
+  // картинка под глазами не уезжала, — прошлое открывается прокруткой влево.
+  const planStart = result.planStartIndex;
+  const prevPlanStart = useRef(planStart);
+  useLayoutEffect(() => {
+    const delta = planStart - prevPlanStart.current;
+    prevPlanStart.current = planStart;
+    if (delta !== 0 && scrollRef.current) scrollRef.current.scrollLeft += delta * cell;
+  }, [planStart, cell]);
+
   // Реальные даты старта закреплённых этапов — для подсказки на блоках,
   // обрезанных началом горизонта (их видимый старт — не настоящий).
   const pinnedStartById = useMemo(() => {
@@ -512,6 +522,13 @@ export function GanttChart({
                     style={{ width: todayIndex * cell }}
                   />
                 )}
+                {/* Граница начала плана — видна только в режиме «Прошлое». */}
+                {planStart > 0 && (
+                  <div
+                    className="absolute inset-y-0 border-l-2 border-dashed border-line"
+                    style={{ left: planStart * cell }}
+                  />
+                )}
                 {showReleases &&
                   [...releaseMarkers.keys()].map((idx) => (
                     <div
@@ -540,6 +557,7 @@ export function GanttChart({
                         key={emp.id}
                         emp={emp}
                         days={days}
+                        planStart={planStart}
                         cell={cell}
                         nameW={nameW}
                         readOnly={readOnly}
@@ -847,7 +865,9 @@ function layoutRow(
 
   let busyDays = 0;
   if (occ) {
-    for (const idx of occ.keys()) if (idx < loadCount) busyDays++;
+    // Окно загрузки отсчитывается от начала плана, а не от начала сетки.
+    const from = result.planStartIndex;
+    for (const idx of occ.keys()) if (idx >= from && idx < from + loadCount) busyDays++;
   }
 
   return {
@@ -890,6 +910,7 @@ function unavailableLayout(emp: Employee, days: string[]) {
 function EmployeeRow({
   emp,
   days,
+  planStart,
   cell,
   nameW,
   readOnly,
@@ -911,6 +932,8 @@ function EmployeeRow({
 }: {
   emp: Employee;
   days: string[];
+  /** Индекс начала плана в сетке: левее — прошлое, туда этапы не бросаем. */
+  planStart: number;
   cell: number;
   nameW: number;
   readOnly: boolean;
@@ -947,7 +970,7 @@ function EmployeeRow({
   // предыдущего; наезд на следующий закреплённый не блокируем — см. pinOrder).
   // Дни за видимой сеткой перепроверяет moveStage по реальным датам.
   const canDropAt = (i: number) => {
-    if (!droppable || dragging === null) return false;
+    if (!droppable || dragging === null || i < planStart) return false;
     for (let d = i; d < i + dragging.durationDays; d++) {
       if (unavailable.titles.has(d)) return false;
     }

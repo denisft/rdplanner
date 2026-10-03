@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { schedule } from './scheduler';
-import { shiftHorizonStart, shiftTarget } from './horizon';
+import { pastViewStart, shiftHorizonStart, shiftTarget } from './horizon';
 import type { AppData, Employee, Task } from '../types';
 
 function emp(id: string, name = id): Employee {
@@ -197,6 +197,96 @@ describe('shiftHorizonStart', () => {
     const once = shiftHorizonStart(data, schedule(data), NEW_START);
     const twice = shiftHorizonStart(once, schedule(once), NEW_START);
     expect(JSON.stringify(twice)).toBe(JSON.stringify(once));
+  });
+});
+
+describe('просмотр прошлого (gridStart)', () => {
+  // План после сдвига: Straddle и Pinned начаты до границы, After — после.
+  const shifted = () => {
+    const data = livePlan();
+    return shiftHorizonStart(data, schedule(data), NEW_START);
+  };
+  const startDate = (r: ReturnType<typeof schedule>, stageId: string) => {
+    const s = r.scheduledStages.find((x) => x.stageId === stageId)!;
+    return s.startIndex >= 0 ? r.days[s.startIndex] : null;
+  };
+  const endDate = (r: ReturnType<typeof schedule>, stageId: string) => {
+    const s = r.scheduledStages.find((x) => x.stageId === stageId)!;
+    return s.endIndex >= 0 ? r.days[s.endIndex] : null;
+  };
+
+  it('pastViewStart — понедельник недели самого раннего прошлого этапа', () => {
+    expect(pastViewStart(shifted())).toBe('2026-06-01');
+    expect(pastViewStart(livePlan())).toBeNull(); // до начала плана ничего нет
+  });
+
+  it('прошлые этапы видны на своих датах целиком', () => {
+    const data = shifted();
+    const past = schedule(data, { gridStart: '2026-06-01' });
+    expect(past.days[0]).toBe('2026-06-01');
+    expect(past.days[past.planStartIndex]).toBe(NEW_START);
+    expect(startDate(past, 'a1')).toBe('2026-06-01');
+    expect(past.scheduledStages.find((s) => s.stageId === 'a1')!.clippedStart).toBeUndefined();
+    expect(startDate(past, 'c1')).toBe('2026-06-10');
+  });
+
+  it('инвариант: план не меняется — те же релизы и те же даты этапов', () => {
+    const data = shifted();
+    const normal = schedule(data);
+    const past = schedule(data, { gridStart: '2026-06-01' });
+    for (const r of normal.releases) {
+      expect(past.releases.find((x) => x.taskId === r.taskId)!.releaseDate).toBe(
+        r.releaseDate,
+      );
+    }
+    for (const s of normal.scheduledStages) {
+      expect(endDate(past, s.stageId)).toBe(endDate(normal, s.stageId));
+      if (!s.clippedStart) {
+        expect(startDate(past, s.stageId)).toBe(startDate(normal, s.stageId));
+      }
+    }
+  });
+
+  it('авторазмещение не заходит левее начала плана, даже если там свободно', () => {
+    const data = base(
+      [
+        {
+          id: 't',
+          name: 'Auto',
+          priority: 1,
+          stages: [{ id: 's', type: 'development', durationDays: 3, assigneeId: 'dev' }],
+        },
+      ],
+      [emp('dev')],
+    );
+    const past = schedule(data, { gridStart: '2026-05-18' });
+    expect(startDate(past, 's')).toBe('2026-06-01');
+  });
+
+  it('целиком прожитая задача возвращается на гант', () => {
+    const data = base(
+      [
+        {
+          id: 'past',
+          name: 'Lived',
+          priority: 1,
+          stages: [{ id: 'p1', type: 'development', durationDays: 5, assigneeId: 'dev' }],
+        },
+      ],
+      [emp('dev')],
+    );
+    const before = schedule(data);
+    const moved = shiftHorizonStart(data, before, NEW_START);
+    const past = schedule(moved, { gridStart: pastViewStart(moved)! });
+    expect(startDate(past, 'p1')).toBe('2026-06-01');
+    expect(past.releases[0].releaseDate).toBe(before.releases[0].releaseDate);
+  });
+
+  it('gridStart не раньше начала плана игнорируется', () => {
+    const data = livePlan();
+    const r = schedule(data, { gridStart: '2026-07-01' });
+    expect(r.days[0]).toBe(data.horizonStart);
+    expect(r.planStartIndex).toBe(0);
   });
 });
 

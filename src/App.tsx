@@ -32,7 +32,7 @@ import { schedule, stageOverlapsUnavailable } from './engine/scheduler';
 import { pinRespectsOrder } from './engine/pinOrder';
 import { teamView } from './engine/teams';
 import { completeTask, reopenTask } from './engine/complete';
-import { shiftHorizonStart, shiftTarget } from './engine/horizon';
+import { pastViewStart, shiftHorizonStart, shiftTarget } from './engine/horizon';
 import { gridDayCount } from './engine/gridRange';
 import { formatISO, parseISO } from './engine/dates';
 import { rangeLabel } from './engine/explain';
@@ -94,6 +94,10 @@ const newId = () =>
 // поэтому живёт в localStorage, а не в данных плана (файл/общая ссылка).
 const SHOW_RELEASES_KEY = 'resource-planner:show-releases';
 
+// Настройка вида «показывать прошлое на ганте» (этапы до начала плана) —
+// тоже личное предпочтение зрителя; по умолчанию выключена.
+const SHOW_PAST_KEY = 'resource-planner:show-past';
+
 // Плашка «сдвиньте начало горизонта»: закрытие запоминается до конца дня.
 // Тоже настройка вида — в localStorage, не в AppData.
 const SHIFT_NUDGE_KEY = 'resource-planner:shift-nudge-dismissed';
@@ -111,6 +115,14 @@ function loadShowReleases(): boolean {
     return localStorage.getItem(SHOW_RELEASES_KEY) !== '0';
   } catch {
     return true;
+  }
+}
+
+function loadShowPast(): boolean {
+  try {
+    return localStorage.getItem(SHOW_PAST_KEY) === '1';
+  } catch {
+    return false;
   }
 }
 
@@ -202,6 +214,18 @@ export default function App() {
       return next;
     });
 
+  const [showPast, setShowPast] = useState<boolean>(loadShowPast);
+  const togglePast = () =>
+    setShowPast((v) => {
+      const next = !v;
+      try {
+        localStorage.setItem(SHOW_PAST_KEY, next ? '1' : '0');
+      } catch {
+        // приватный режим — настройка просто не переживёт перезагрузку
+      }
+      return next;
+    });
+
   // Активная команда (вкладка). Валидируем против data.teams — при загрузке
   // чужого плана/демо запомненный id может не подойти, тогда берём первую команду.
   const [activeTeamId, setActiveTeamId] = useState<string | null>(loadActiveTeam);
@@ -261,6 +285,16 @@ export default function App() {
   const shown = useMemo(
     () => (previewView === viewData ? result : schedule(previewView)),
     [previewView, viewData, result],
+  );
+
+  // Режим «Прошлое»: гант рисуется с самого раннего этапа, закреплённого до
+  // начала плана. Это только вид — отдельный расчёт с растянутой влево сеткой;
+  // таблица, отчёт и экспорт по-прежнему считаются от начала плана (`shown`).
+  const pastStart = useMemo(() => pastViewStart(previewView), [previewView]);
+  const ganttResult = useMemo(
+    () =>
+      showPast && pastStart ? schedule(previewView, { gridStart: pastStart }) : shown,
+    [showPast, pastStart, previewView, shown],
   );
 
   // Что показать внизу панели: релиз черновика и чьи релизы он сдвинул.
@@ -792,7 +826,7 @@ export default function App() {
         План
         {visibleDays > 0 && (
           <small className="text-[12.5px] font-semibold text-faint tabular-nums">
-            {rangeLabel(shown.days[0], shown.days[visibleDays - 1])}
+            {rangeLabel(ganttResult.days[0], shown.days[visibleDays - 1])}
           </small>
         )}
       </h2>
@@ -846,6 +880,19 @@ export default function App() {
         />
         Релизы
       </label>
+      {pastStart && (
+        <Tip label="Показать этапы до начала плана. На расчёт и даты релизов не влияет">
+          <label className="inline-flex cursor-pointer items-center gap-2 text-[13px] font-semibold text-muted select-none">
+            <input
+              type="checkbox"
+              checked={showPast}
+              onChange={togglePast}
+              className="relative h-[18px] w-[30px] cursor-pointer appearance-none rounded-full bg-line transition-colors after:absolute after:top-0.5 after:left-0.5 after:h-3.5 after:w-3.5 after:rounded-full after:bg-white after:shadow after:transition-transform after:content-[''] checked:bg-primary checked:after:translate-x-3"
+            />
+            Прошлое
+          </label>
+        </Tip>
+      )}
       {!readOnly && pinnedCount > 0 && (
         <Tip label="Снять все ручные закрепления и вернуть автопланирование">
           <Button size="sm" variant="ghost" onClick={resetPins}>
@@ -880,7 +927,7 @@ export default function App() {
     <GanttChart
       ref={ganttRef}
       data={previewView}
-      result={shown}
+      result={ganttResult}
       showReleases={showReleases}
       fillHeight={ganttFull}
       readOnly={readOnly}

@@ -18,5 +18,9 @@ export function gridDayCount(result: ScheduleResult, horizonWeeks: number): numb
     last = Math.max(last, result.days.indexOf(r.releaseDate));
   }
   const needed = last >= 0 ? Math.ceil((last + 1 + TAIL_DAYS) / 5) * 5 : 0;
-  return Math.min(result.days.length, Math.max(horizonWeeks * 5, needed));
+  // При просмотре прошлого горизонт отсчитывается от начала плана.
+  return Math.min(
+    result.days.length,
+    Math.max(result.planStartIndex + horizonWeeks * 5, needed),
+  );
 }

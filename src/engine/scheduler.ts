@@ -130,6 +130,9 @@ export interface TaskRelease {
 export interface ScheduleResult {
   /** Рабочие дни (ISO) по индексам. */
   days: string[];
+  /** Индекс начала плана (horizonStart) в `days`. 0, пока сетка не растянута
+      в прошлое (см. `ScheduleOptions.gridStart`). */
+  planStartIndex: number;
   scheduledStages: ScheduledStage[];
   releases: TaskRelease[];
   /** employeeId -> (dayIndex -> список stageId, занявших день). >1 = перегрузка. */
@@ -179,8 +182,27 @@ function toRuns(indices: number[]): { from: number; to: number }[] {
   return runs;
 }
 
-export function schedule(data: AppData): ScheduleResult {
-  const days = generateWorkingDays(data.horizonStart, SCHEDULING_HORIZON_DAYS);
+export interface ScheduleOptions {
+  /**
+   * Просмотр прошлого: сетка начинается с этой даты, раньше `horizonStart`.
+   * План от этого не меняется — авторазмещение по-прежнему не кладёт ничего
+   * левее начала плана, а закреплённые в прошлом этапы просто становятся
+   * видны на своих датах. Дата не раньше horizonStart игнорируется.
+   */
+  gridStart?: string;
+}
+
+export function schedule(data: AppData, options: ScheduleOptions = {}): ScheduleResult {
+  const gridStart =
+    options.gridStart && options.gridStart < data.horizonStart
+      ? options.gridStart
+      : data.horizonStart;
+  // Запас вправо считаем от начала плана, а не от начала сетки: иначе при
+  // просмотре прошлого дальние этапы перестали бы помещаться.
+  const days = generateWorkingDays(
+    gridStart,
+    SCHEDULING_HORIZON_DAYS + workingDaysBefore(gridStart, data.horizonStart),
+  );
   const maxIndex = days.length;
   const dayToIndex = new Map<string, number>();
   days.forEach((d, i) => dayToIndex.set(d, i));
@@ -196,6 +218,8 @@ export function schedule(data: AppData): ScheduleResult {
     const i = days.findIndex((d) => d >= dateISO);
     return i < 0 ? maxIndex : i;
   };
+  // Начало плана в сетке: левее него авторазмещение не заходит.
+  const planStartIndex = floorIndexOf(data.horizonStart);
 
   // Паспорт этапа для объяснений: чей он и закреплён ли вручную.
   const stageMeta = new Map<
@@ -356,7 +380,10 @@ export function schedule(data: AppData): ScheduleResult {
     const done = !!task.done;
     // Мягкая граница старта: незакреплённые этапы не размещаются раньше неё.
     // Существующие задачи без earliestStart её не имеют — их раскладка не меняется.
-    const startFloor = task.earliestStart ? floorIndexOf(task.earliestStart) : 0;
+    const startFloor = Math.max(
+      planStartIndex,
+      task.earliestStart ? floorIndexOf(task.earliestStart) : 0,
+    );
     let prevEnd = -1; // индекс окончания предыдущего этапа
     let prevStage: { id: string; type: StageType } | null = null;
     let taskEnd = -1;
@@ -416,7 +443,7 @@ export function schedule(data: AppData): ScheduleResult {
             endDate: dayAt(prevEnd),
           });
         }
-        if (task.earliestStart && startFloor > 0 && startFloor === earliest) {
+        if (task.earliestStart && startFloor > planStartIndex && startFloor === earliest) {
           factors.push({ kind: 'earliestStart', date: task.earliestStart });
         }
       }
@@ -586,7 +613,7 @@ export function schedule(data: AppData): ScheduleResult {
     placement.conflicts.sort((a, b) => a.from.localeCompare(b.from));
   }
 
-  return { days, scheduledStages, releases, occupancy, reasons, warnings };
+  return { days, planStartIndex, scheduledStages, releases, occupancy, reasons, warnings };
 }
 
 /** Список индексов с перегрузкой (>1 этап в день) по сотруднику. */
