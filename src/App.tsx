@@ -67,6 +67,8 @@ import {
 } from './storage/shareStorage';
 import { downloadMarkdown } from './export/markdownExport';
 import { downloadReleasesCsv } from './export/csvExport';
+import { downloadTaskStagesCsv } from './export/taskStagesCsv';
+import { buildTaskStagesReport } from './engine/taskStages';
 import { track } from './analytics';
 import { usePlanHistory } from './history';
 import { useTheme } from './ui/theme';
@@ -790,6 +792,13 @@ export default function App() {
     toast('Выгружено в team-plan.md');
   };
 
+  // Все задачи активной команды за всё время, включая завершённые.
+  const exportStagesCsv = () => {
+    downloadTaskStagesCsv(buildTaskStagesReport(viewData));
+    track('export_stages_csv');
+    toast('Выгружены задачи по этапам');
+  };
+
   const noop = () => {};
 
   if (loading) {
@@ -1071,6 +1080,13 @@ export default function App() {
                   </MenuItem>
                   <MenuItem icon={<Download size={16} />} onSelect={exportMd}>
                     Экспорт .md
+                  </MenuItem>
+                  <MenuItem
+                    icon={<Download size={16} />}
+                    disabled={viewData.tasks.length === 0}
+                    onSelect={exportStagesCsv}
+                  >
+                    Задачи по этапам .csv
                   </MenuItem>
                   {!hasFileSystemAccess() && (
                     <MenuNote>
